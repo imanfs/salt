@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from salt.losses.classification import ClassificationLoss
+from salt.losses.regression import RegressionLoss
 
 
 class LightningTagger(pl.LightningModule):
@@ -29,9 +30,18 @@ class LightningTagger(pl.LightningModule):
 
         self.losses = {}
         for task_name, opts in self.tasks.items():
-            self.losses[task_name] = ClassificationLoss(
-                task_name, weight=opts["weight"]
-            )
+            if "classification" in task_name:
+                self.losses[task_name] = ClassificationLoss(
+                    task_name, weight=opts["weight"]
+                )
+            elif "regression" in task_name:
+                self.losses[task_name] = RegressionLoss(
+                    task_name,
+                    **opts,
+                )
+                pass
+            else:
+                raise ValueError(f"The task type {task_name} was not regonised.")
 
     def forward(self, x, mask):
         """Forward pass through the model.

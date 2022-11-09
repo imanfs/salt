@@ -10,6 +10,7 @@ class JetTagger(nn.Module):
         pool_net: nn.Module = None,
         jet_net: nn.Module = None,
         track_net: nn.Module = None,
+        regression_net: nn.Module = None,
     ):
         """Jet tagger model.
 
@@ -27,6 +28,8 @@ class JetTagger(nn.Module):
             Jet classification network
         track_net : nn.Module
             Track classification network
+        regression_net " nn.Module
+            Regression variable prediction net
         """
         super().__init__()
 
@@ -36,11 +39,17 @@ class JetTagger(nn.Module):
         self.pool_net = pool_net
         self.track_net = track_net
         self.tasks = tasks
+        self.regression_net = regression_net
 
         if "jet_classification" in self.tasks and not jet_net:
             raise ValueError("Can't run jet classification without a jet net.")
         if "track_classification" in self.tasks and not track_net:
             raise ValueError("Can't run track classification without a track net.")
+
+        if "regression" in self.tasks and not regression_net:
+            raise ValueError(
+                "Can't run regression predictions without a regression net"
+            )
 
     def forward(self, x, mask):
         mask[..., 0] = False  # hack to make the MHA work
@@ -54,5 +63,7 @@ class JetTagger(nn.Module):
             preds["jet_classification"] = self.jet_net(pooled)
         if self.track_net and "track_classification" in self.tasks:
             preds["track_classification"] = self.track_net(embd_x)
+        if self.regression_net and "regression" in self.tasks:
+            preds["regression"] = self.regression_net(pooled)
 
         return preds

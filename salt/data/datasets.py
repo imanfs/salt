@@ -43,6 +43,8 @@ class TrainJetDataset(Dataset):
         self.valid = {"track": self.file[f"{inputs['track']}/valid"]}
         self.labels = {n: self.file[f"{g}/labels"] for n, g in inputs.items()}
 
+        if "additional_labels" in self.file[inputs["jet"]]:
+            self.labels["additional"] = self.file[f"{inputs['jet']}/additional_labels"]
         # set number of jets
         self.num_jets = self.get_num_jets(num_jets)
 
@@ -77,6 +79,11 @@ class TrainJetDataset(Dataset):
             "jet_classification": jet_class_label,
             "track_classification": track_labels[..., 0],
         }
+        # TODO - check the tasks for this somehow, we don't want to be passing these
+        # if they're not being used
+        if "additional" in self.labels:
+            additional_labels = torch.tensor(self.labels["additional"][jet_idx])
+            labels["regression"] = additional_labels
 
         return inputs, mask, labels
 
