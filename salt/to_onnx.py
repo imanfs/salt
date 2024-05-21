@@ -18,7 +18,11 @@ from salt.models.transformer_v2 import change_attn_backends
 from salt.modelwrapper import ModelWrapper
 from salt.utils.inputs import inputs_sep_no_pad, inputs_sep_with_pad
 from salt.utils.union_find import get_node_assignment_jit
-
+from salt.utils.cli import SaltCLI
+from salt.utils.inputs import inputs_sep_no_pad, inputs_sep_with_pad
+from salt.utils.union_find import get_node_assignment
+from salt.utils.mask_utils import indices_from_mask
+from salt.utils.configs import MaskformerConfig
 torch.manual_seed(42)
 # https://gitlab.cern.ch/atlas/athena/-/blob/master/PhysicsAnalysis/JetTagging/FlavorTagDiscriminants/Root/DataPrepUtilities.cxx
 TRACK_SELECTIONS = [
@@ -79,6 +83,10 @@ def parse_args(args):
         action="store_true",
     )
     parser.add_argument(
+        "-mf",
+        "--object_name",
+    )
+    parser.add_argument(
         "-f",
         "--force",
         help="Run with uncomitted changes.",
@@ -93,8 +101,34 @@ def get_probs(outputs: Tensor):
     return tuple(output.squeeze() for output in torch.split(outputs, 1, -1))
 
 
+def get_maskformer_outputs(objects):
+    print(objects.keys())
+    print(objects['class_probs'].shape)
+    # Convert the (N,M) -> (M,) mask indices
+    masks = objects['masks']
+    class_probs = objects['class_probs']
+    regression = objects['regression']
+    object_leading = objects['regression']
+    # Define the leading object as the one with the highest regression[0] value 
+    # in vertexing case, this is the pT
+    order = torch.argsort(object_leading[:,:, 0], descending=True)
+    indices = torch.arange(order.shape[0]).unsqueeze(1).expand_as(order)
+    
+    # Apply the re-ordering
+    # masks = masks[indices, order]
+    # class_probs = class_probs[indices, order]
+    # regression = regression[indices, order]
+    # Convert our masks (N,M), now in pT order, to be (M,) indices
+    object_indices = indices_from_mask(masks)
+    print(regression[:, :, 0])
+    # Return the leading regression level variables to be stored at global-level
+    leading_regression = regression[:, 0]
+
+    return leading_regression, masks, class_probs, regression
+
+
 class ONNXModel(ModelWrapper):
-    def __init__(self, name: str | None = None, include_aux: bool = False, **kwargs) -> None:
+    def __init__(self, name: str | None = None, include_aux: bool = False, object_name : str | None = None, mf_config : dict | None =None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = name if name else self.name
         assert len(self.model.init_nets) == 1, "Multi input ONNX models are not yet supported."
@@ -102,10 +136,19 @@ class ONNXModel(ModelWrapper):
         assert "-" not in self.name, "Model name cannot contain dashes."
         self.include_aux = include_aux
         self.const = "tracks"
+        self.object = object_name
+        self.mf_config = MaskformerConfig(**mf_config) if mf_config else None
+        if self.object:
+            self.object_params = {
+                "class_label": self.mf_config.object.class_label,
+                "label_map": [f"p{name}" for name in self.mf_config.object.class_names],
+            }
+            print('OBJECT PARAMS', self.object_params)
         self.input_names = ["jet_features", "track_features"]
         jets, tracks = inputs_sep_no_pad(
             1, 40, self.input_dims[self.global_object], self.input_dims[self.const]
         )
+        self.has_global_task = len([t for t in self.model.tasks if t.input_name == self.global_object]) > 0
         self.example_input_array = jets, tracks.squeeze(0)  # used for the tracing during export
 
     @property
@@ -131,6 +174,17 @@ class ONNXModel(ModelWrapper):
             if "track_vertexing" in [t.name for t in self.model.tasks]:
                 out_name = f"{self.model_name}_VertexIndex"
                 outputs.append(out_name)
+        if self.object:
+            regression_task = [t for t in self.model.tasks 
+                               if t.input_name == 'objects' and t.name == 'regression']
+            assert len(regression_task) == 1, "Object outputs require a regression task"
+            # First we append the leading jet regression variables
+            outputs += [
+                f"{self.model_name}_leading_{self.object}_{v}"
+                for v in regression_task[0].targets]
+            outputs += [f"{self.model_name}_{self.object}_index"]
+            outputs += [f"{self.model_name}_{self.object}_class"]
+            outputs += [f"{self.model_name}_{self.object}_regression"]
 
         return outputs
 
@@ -148,6 +202,9 @@ class ONNXModel(ModelWrapper):
             if "track_vertexing" in [t.name for t in self.model.tasks]:
                 out_name = f"{self.model_name}_VertexIndex"
                 dynamic_axes[out_name] = {0: "n_tracks"}
+        if self.object:
+            out_name = f"{self.model_name}_{self.object}"
+            dynamic_axes[out_name] = {0: "n_tracks"}
         return dynamic_axes
 
     def forward(self, jets: Tensor, tracks: Tensor, labels=None):  # type: ignore[override]
@@ -160,9 +217,12 @@ class ONNXModel(ModelWrapper):
         outputs = super().forward({self.global_object: jets, self.const: tracks}, None)[0]
 
         # get class probabilities
+        # onnx_outputs = get_probs(
+        #     outputs[self.global_object][f"{self.global_object}_classification"]
+        # )
         onnx_outputs = get_probs(
-            outputs[self.global_object][f"{self.global_object}_classification"]
-        )
+                outputs[self.global_object][f"{self.global_object}_classification"]
+        ) if self.has_global_task else ()
 
         # add aux outputs
         if self.include_aux:
@@ -178,7 +238,22 @@ class ONNXModel(ModelWrapper):
                 vertex_indices = get_node_assignment_jit(edge_scores, pad_mask)
                 vertex_list = mask_fill_flattened(vertex_indices, pad_mask)
                 onnx_outputs += (vertex_list.reshape(-1).char(),)
-
+        if self.object:
+            print('LOL'*100)
+            assert 'objects' in outputs, 'No MF objects in outputs'
+            print(outputs['objects'].keys())
+            print(outputs['objects']['masks'])
+            print(indices_from_mask(outputs['objects']['masks']))
+            print(outputs['objects']['class_probs'])
+            # Extract the mf outputs
+            leading_reg, masks, class_probs, regression = get_maskformer_outputs(outputs['objects'])
+            
+            for r in leading_reg[0]:
+                onnx_outputs += (r,)
+            onnx_outputs += (indices_from_mask(masks).char(),)
+            onnx_outputs += (torch.argmax(class_probs, dim=-1).char(),)
+            onnx_outputs += (regression,)
+        print(onnx_outputs)
         return onnx_outputs
 
 
@@ -277,6 +352,7 @@ def main(args=None):
         config_path = args.ckpt_path.parents[1] / "config.yaml"
         assert config_path.is_file(), f"Could not find config file at {config_path}"
 
+
     # instantiate pytorch and wrapper models
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -287,11 +363,22 @@ def main(args=None):
         pt_model.eval()
         pt_model.float()
 
+        if args.object_name:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            mf_config = config['data'].get('mf_config')
+            if not mf_config:
+                raise ValueError('No mf_config in config')
+        else:
+            mf_config = {}
         onnx_model = ONNXModel.load_from_checkpoint(
             args.ckpt_path,
             name=args.name,
             include_aux=args.include_aux,
+            object_name=args.object_name,
+            mf_config=mf_config,
             map_location=torch.device("cpu"),
+
         )
         onnx_model.eval()
         change_attn_backends(
@@ -315,6 +402,7 @@ def main(args=None):
         input_names=onnx_model.input_names,
         output_names=onnx_model.output_names,
         dynamic_axes=onnx_model.dynamic_axes,
+        verbose=True,
     )
 
     # add metadata
