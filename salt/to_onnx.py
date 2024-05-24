@@ -109,15 +109,26 @@ def get_maskformer_outputs(objects):
     class_probs = objects['class_probs']
     regression = objects['regression']
     object_leading = objects['regression']
+
+    # TODO not enforce == 2
+    null_preds = class_probs[:, :, -1] > 0.5
+    if not null_preds.any():
+        # If we have no predicted objects, we return arange(0,40) for vertex index, and
+        # NaN (check?) for regression values
+
+        return torch.ones((1,5))*torch.nan, torch.arange(40), class_probs, torch.ones((1,5, 5))*torch.nan
+    object_leading[null_preds] = -999
+    regression[null_preds] = np.nan
     # Define the leading object as the one with the highest regression[0] value 
     # in vertexing case, this is the pT
     order = torch.argsort(object_leading[:,:, 0], descending=True)
-    indices = torch.arange(order.shape[0]).unsqueeze(1).expand_as(order)
     
-    # Apply the re-ordering
-    # masks = masks[indices, order]
-    # class_probs = class_probs[indices, order]
-    # regression = regression[indices, order]
+    
+    # Use gather to reorder tensors along a specific dimension
+    # TODO check this is working as expected
+    masks = torch.gather(masks, 1, order.unsqueeze(-1).expand(-1, -1, masks.size(-1)))
+    class_probs = torch.gather(class_probs, 1, order.unsqueeze(-1).expand(-1, -1, class_probs.size(-1)))
+    regression = torch.gather(regression, 1, order.unsqueeze(-1).expand(-1, -1, regression.size(-1)))
     # Convert our masks (N,M), now in pT order, to be (M,) indices
     object_indices = indices_from_mask(masks)
     print(regression[:, :, 0])
@@ -161,10 +172,12 @@ class ONNXModel(ModelWrapper):
         """The output names are a list of strings, one for each output of the model."""
         # get the global task output
         global_tasks = [t for t in self.model.tasks if t.input_name == self.global_object]
-        assert len(global_tasks) == 1, "Multi global task ONNX models are not yet supported."
-        object_classes = global_tasks[0].class_names
-        outputs = [f"{self.model_name}_p{flav.rstrip('jets')}" for flav in object_classes]
-
+        assert len(global_tasks) <= 1, "Multi global task ONNX models are not yet supported."
+        if self.has_global_task:
+            object_classes = global_tasks[0].class_names
+            outputs = [f"{self.model_name}_p{flav.rstrip('jets')}" for flav in object_classes]
+        else:
+            outputs = []
         # aux task output names
         if self.include_aux:
             if "track_origin" in [t.name for t in self.model.tasks]:
@@ -183,8 +196,8 @@ class ONNXModel(ModelWrapper):
                 f"{self.model_name}_leading_{self.object}_{v}"
                 for v in regression_task[0].targets]
             outputs += [f"{self.model_name}_{self.object}_index"]
-            outputs += [f"{self.model_name}_{self.object}_class"]
-            outputs += [f"{self.model_name}_{self.object}_regression"]
+            # outputs += [f"{self.model_name}_{self.object}_class"]
+            # outputs += [f"{self.model_name}_{self.object}_regression"]
 
         return outputs
 
@@ -235,6 +248,7 @@ class ONNXModel(ModelWrapper):
             if "track_vertexing" in track_outs:
                 pad_mask = torch.zeros(tracks.shape[:-1], dtype=torch.bool)
                 edge_scores = track_outs["track_vertexing"]
+                print(edge_scores.shape, flush=True)
                 vertex_indices = get_node_assignment_jit(edge_scores, pad_mask)
                 vertex_list = mask_fill_flattened(vertex_indices, pad_mask)
                 onnx_outputs += (vertex_list.reshape(-1).char(),)
@@ -245,14 +259,22 @@ class ONNXModel(ModelWrapper):
             print(outputs['objects']['masks'])
             print(indices_from_mask(outputs['objects']['masks']))
             print(outputs['objects']['class_probs'])
+            regression_task = [t for t in self.model.tasks if t.input_name == 'objects' and t.name == 'regression']
+            assert len(regression_task) == 1, "Object outputs require a regression task"
+            regression_task = regression_task[0]
+
+            for i, t in enumerate(regression_task.targets):
+                unscaled_preds = regression_task.scaler.inverse(t, outputs['objects']["regression"][:, :, i])
+                outputs['objects']['regression'][:, :, i] = unscaled_preds
+            # outputs['objects']['regression'] = regression_task.run_inference
             # Extract the mf outputs
             leading_reg, masks, class_probs, regression = get_maskformer_outputs(outputs['objects'])
             
             for r in leading_reg[0]:
                 onnx_outputs += (r,)
-            onnx_outputs += (indices_from_mask(masks).char(),)
-            onnx_outputs += (torch.argmax(class_probs, dim=-1).char(),)
-            onnx_outputs += (regression,)
+            onnx_outputs += (indices_from_mask(masks).reshape(-1).char(),)
+            # onnx_outputs += (torch.argmax(class_probs, dim=-1).char(),)
+            # onnx_outputs += (regression,)
         print(onnx_outputs)
         return onnx_outputs
 
@@ -266,7 +288,11 @@ def compare_output(pt_model, onnx_session, include_aux, n_track=40):
 
     inputs_pt = {"jets": jets, "tracks": tracks}
     outputs_pt = pt_model(inputs_pt, {"tracks": pad_mask})[0]
-    pred_pt_jc = [p.detach().numpy() for p in get_probs(outputs_pt["jets"]["jets_classification"])]
+    pred_pt_jc = (
+        [p.detach().numpy() for p in get_probs(outputs_pt["jets"]["jets_classification"])]
+        if "jets" in outputs_pt
+        else []
+        )
 
     inputs_onnx = {
         "jet_features": jets.numpy(),
@@ -305,7 +331,8 @@ def compare_output(pt_model, onnx_session, include_aux, n_track=40):
         )
 
     # test vertexing
-    if include_aux:
+    if include_aux and "track_vertexing" in outputs_pt["tracks"]:
+        
         pred_pt_scores = outputs_pt["tracks"]["track_vertexing"].detach()
         pred_pt_indices = get_node_assignment_jit(pred_pt_scores, pad_mask)
         pred_pt_vtx = mask_fill_flattened(pred_pt_indices, pad_mask)
@@ -352,13 +379,16 @@ def main(args=None):
         config_path = args.ckpt_path.parents[1] / "config.yaml"
         assert config_path.is_file(), f"Could not find config file at {config_path}"
 
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
 
     # instantiate pytorch and wrapper models
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
         pt_model = ModelWrapper.load_from_checkpoint(
-            args.ckpt_path, map_location=torch.device("cpu")
+            args.ckpt_path, map_location=torch.device("cpu"),
+            norm_config=config["model"]["norm_config"],
         )
         pt_model.eval()
         pt_model.float()
@@ -378,8 +408,10 @@ def main(args=None):
             object_name=args.object_name,
             mf_config=mf_config,
             map_location=torch.device("cpu"),
+            norm_config=config["model"]["norm_config"],
 
         )
+        print("OUTPUTS", onnx_model.output_names)
         onnx_model.eval()
         change_attn_backends(
             onnx_model.model, "torch-math"
@@ -402,7 +434,7 @@ def main(args=None):
         input_names=onnx_model.input_names,
         output_names=onnx_model.output_names,
         dynamic_axes=onnx_model.dynamic_axes,
-        verbose=True,
+        
     )
 
     # add metadata
@@ -468,6 +500,7 @@ def add_metadata(
 
     # write metadata as json string
     metadata = {"gnn_config": json.dumps(metadata)}
+    
     for k, v in metadata.items():
         meta = onnx_model.metadata_props.add()
         meta.key = k
