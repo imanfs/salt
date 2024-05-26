@@ -285,7 +285,8 @@ def main(args=None):
         warnings.simplefilter("ignore")
 
         pt_model = ModelWrapper.load_from_checkpoint(
-            args.ckpt_path, map_location=torch.device("cpu"),
+            args.ckpt_path,
+            map_location=torch.device("cpu"),
             norm_config=config["model"]["norm_config"],
         )
         pt_model.eval()
