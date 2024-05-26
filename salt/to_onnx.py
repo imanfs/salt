@@ -277,12 +277,16 @@ def main(args=None):
         config_path = args.ckpt_path.parents[1] / "config.yaml"
         assert config_path.is_file(), f"Could not find config file at {config_path}"
 
+    with config_path.open("r") as f:
+        config = yaml.safe_load(f)
+        assert config, f"Could not load config file at {config_path}"
     # instantiate pytorch and wrapper models
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
         pt_model = ModelWrapper.load_from_checkpoint(
-            args.ckpt_path, map_location=torch.device("cpu")
+            args.ckpt_path, map_location=torch.device("cpu"),
+            norm_config=config["model"]["norm_config"],
         )
         pt_model.eval()
         pt_model.float()
@@ -292,6 +296,7 @@ def main(args=None):
             name=args.name,
             include_aux=args.include_aux,
             map_location=torch.device("cpu"),
+            norm_config=config["model"]["norm_config"],
         )
         onnx_model.eval()
         change_attn_backends(
