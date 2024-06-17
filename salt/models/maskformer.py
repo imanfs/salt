@@ -4,7 +4,7 @@ import torch
 from torch import Tensor, nn
 
 from salt.models import MaskFormerLoss
-from salt.models.transformer_v2 import GLU, CrossAttention, SelfAttention
+from salt.models.transformer_v2 import GLU, Attention
 from salt.stypes import Tensors
 
 
@@ -101,6 +101,7 @@ class MaskDecoder(nn.Module):
         # MF only supports one input, if we have multiple then we have no way of knowing
         # what section of the embedding relates to objects we want to generate masks for
         if isinstance(pad_mask, dict):
+        
             assert len(pad_mask) == 1, "Maskformer only supports one input."
             pad_mask = next(iter(pad_mask.values()))
 
@@ -108,6 +109,13 @@ class MaskDecoder(nn.Module):
         # apply norm
         q = self.norm1(self.inital_q.expand(x.shape[0], -1, -1))
         x = self.norm2(x)
+        xpad = torch.zeros((x.shape[0], 1, x.shape[-1]), device=x.device, dtype=x.dtype)
+        
+        if pad_mask is not None:
+            padpad_mask = torch.zeros((pad_mask.shape[0], 1), device=pad_mask.device, dtype=pad_mask.dtype)
+            pad_mask = torch.cat([pad_mask, padpad_mask], dim=1)
+
+        x = torch.cat([x, xpad], dim=1)
 
         intermediate_outputs: list | None = [] if self.aux_loss else None
         for layer in self.layers:
@@ -115,8 +123,14 @@ class MaskDecoder(nn.Module):
                 assert intermediate_outputs is not None
                 intermediate_outputs.append({"embed": q, **self.get_preds(q, x, pad_mask)})
             q, x = layer(q, x, kv_mask=pad_mask)
+        mf_preds = self.get_preds(q, x, pad_mask)
 
-        preds["objects"] = {"embed": q, "x": x, **self.get_preds(q, x, pad_mask)}
+        preds["objects"] = {
+            "embed": q, 
+            "x": x[:, :-1, :], 
+            **self.get_preds(q, x, pad_mask)
+            }
+        preds["objects"]["masks"] = preds["objects"]["masks"][:,:,:-1]
         if self.aux_loss:
             preds["intermediate_outputs"] = intermediate_outputs
 
@@ -131,9 +145,13 @@ def get_masks(x: Tensor, q: Tensor, mask_net: nn.Module, input_pad_mask: Tensor 
     pred_masks = torch.einsum("bqe,ble->bql", mask_tokens, x)
 
     if input_pad_mask is not None:
+
+        t = input_pad_mask.unsqueeze(1).expand_as(pred_masks)
         pred_masks[input_pad_mask.unsqueeze(1).expand_as(pred_masks)] = torch.finfo(
             pred_masks.dtype
         ).min
+
+
     return pred_masks
 
 
@@ -151,28 +169,36 @@ class MaskDecoderLayer(nn.Module):
         self.mask_attention = mask_attention
         self.bidirectional_ca = bidirectional_ca
 
-        self.q_ca = CrossAttention(embed_dim=embed_dim, num_heads=n_heads)
-        self.q_sa = SelfAttention(embed_dim=embed_dim, num_heads=n_heads)
+        self.q_ca = Attention(embed_dim=embed_dim, num_heads=n_heads)
+        self.q_sa = Attention(embed_dim=embed_dim, num_heads=n_heads)
         self.q_dense = GLU(embed_dim)
         if bidirectional_ca:
-            self.kv_ca = CrossAttention(embed_dim=embed_dim, num_heads=n_heads)
+            self.kv_ca = Attention(embed_dim=embed_dim, num_heads=n_heads)
             self.kv_dense = GLU(embed_dim)
         self.mask_net = mask_net
 
     def forward(self, q: Tensor, kv: Tensor, kv_mask: Tensor | None = None) -> Tensor:
         attn_mask = None
-
+        # return q, kv
         # if we want to do mask attention
         if self.mask_attention:
-            # If a BoolTensor is provided, positions with ``True`` are not allowed
-            # to attend while ``False`` values will be unchanged.
-            attn_mask = (get_masks(kv, q, self.mask_net, kv_mask).sigmoid() < 0.1).detach()
+            # New attention masking convention with transformers 2
+            # Positions with True are allowed while False are masked
+            # Compute masks and apply sigmoid
+            attn_mask = get_masks(kv, q, self.mask_net, kv_mask).sigmoid()
 
-            # if the attn mask is invalid for a given query, allow it to attend everywhere
-            attn_mask[torch.where(attn_mask.sum(-1) == attn_mask.shape[-1])] = False
+            # Threshold and detach
+            attn_mask = (attn_mask > 0.9).detach()
+            newmask = torch.all(attn_mask == 0, dim=-1, keepdim=True).expand(attn_mask.shape)
+            # Check if all values along the last dimension are 0 (equivalent to `False` in boolean)
+            # If so, set them to 1 (equivalent to `True` in boolean)
+
+            attn_mask = attn_mask | newmask.bool()
+
+
 
         # update queries with cross attention from nodes
-        q = q + self.q_ca(q, kv, kv_mask=kv_mask, attn_mask=attn_mask)
+        q = q + self.q_ca(q, kv=kv, kv_mask=kv_mask, attn_mask=attn_mask)
 
         # update queries with self attention
         q = q + self.q_sa(q)
@@ -184,7 +210,9 @@ class MaskDecoderLayer(nn.Module):
         if self.bidirectional_ca:
             if attn_mask is not None:
                 attn_mask = attn_mask.transpose(1, 2)
-            kv = kv + self.kv_ca(kv, q, q_mask=kv_mask, attn_mask=attn_mask)
-            kv = kv + self.kv_dense(kv)
+                newmask = torch.all(attn_mask == 1, dim=-1, keepdim=True).expand(attn_mask.shape)
+                attn_mask = attn_mask | ~newmask.bool()
 
+            kv = kv + self.kv_ca(kv, q, attn_mask=attn_mask)
+            kv = kv + self.kv_dense(kv)
         return q, kv

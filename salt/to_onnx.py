@@ -14,10 +14,15 @@ from torch.nn.functional import softmax
 from tqdm import tqdm
 
 from salt.models.task import mask_fill_flattened
+# from salt.models.transformer_v2 import change_attn_backends
 from salt.modelwrapper import ModelWrapper
 from salt.utils.inputs import inputs_sep_no_pad, inputs_sep_with_pad
+from salt.utils.union_find import get_node_assignment_jit
+from salt.utils.cli import SaltCLI
+from salt.utils.inputs import inputs_sep_no_pad, inputs_sep_with_pad
 from salt.utils.union_find import get_node_assignment
-
+from salt.utils.mask_utils import indices_from_mask, masks_to_index
+from salt.utils.configs import MaskformerConfig
 torch.manual_seed(42)
 # https://gitlab.cern.ch/atlas/athena/-/blob/master/PhysicsAnalysis/JetTagging/FlavorTagDiscriminants/Root/DataPrepUtilities.cxx
 TRACK_SELECTIONS = [
@@ -78,6 +83,10 @@ def parse_args(args):
         action="store_true",
     )
     parser.add_argument(
+        "-mf",
+        "--object_name",
+    )
+    parser.add_argument(
         "-f",
         "--force",
         help="Run with uncomitted changes.",
@@ -92,8 +101,62 @@ def get_probs(outputs: Tensor):
     return tuple(output.squeeze() for output in torch.split(outputs, 1, -1))
 
 
+def get_maskformer_outputs(objects):
+    print(objects.keys())
+    print(objects['class_probs'].shape)
+    # Convert the (N,M) -> (M,) mask indices
+    masks = objects['masks']
+    class_probs = objects['class_probs']
+    regression = objects['regression']
+    object_leading = objects['regression']
+    n_tracks = masks.shape[-1] 
+    n_obj = masks.shape[1]
+    n_reg = regression.shape[-1]
+
+    # TODO not enforce == 2
+    if n_tracks == 0:
+        print('lol?')
+        return torch.ones((1,n_obj))*torch.nan, None, class_probs, torch.ones((1,n_obj, n_reg))*torch.nan
+    print(class_probs)
+    null_preds = class_probs[:, :, -1] > 0.9
+    print('CLASS PROBS')
+    print(class_probs)
+    # if not null_preds.any():
+    if False:
+        # If we have no predicted objects, we return arange(0,40) for vertex index, and
+        # NaN (check?) for regression values
+
+        return torch.ones((1,n_obj))*torch.nan, torch.zeros((1, n_obj,n_tracks), dtype=torch.bool), class_probs, torch.ones((1,n_obj, n_reg))*torch.nan
+    print('lol?', masks.shape)
+    print(null_preds.shape)
+    masks = masks.sigmoid() > 0.5
+    object_leading[null_preds] = -999
+    regression[null_preds] = np.nan
+    expanded_null = null_preds.unsqueeze(-1).expand(-1, -1, masks.size(-1))
+    print('these shapes!' , null_preds.shape, masks.shape, expanded_null.shape)
+    # masks[expanded_null] = False
+    # Define the leading object as the one with the highest regression[0] value 
+    # in vertexing case, this is the pT
+    order = torch.argsort(object_leading[:,:, 0], descending=True)
+    order_expanded = order.unsqueeze(-1).expand(-1, -1, masks.size(-1))
+
+    print('pre-re-order', masks.shape)
+    
+    # Use gather to reorder tensors along a specific dimension
+    # TODO check this is working as expected
+    masks = torch.gather(masks, 1, order_expanded)
+    class_probs = torch.gather(class_probs, 1, order.unsqueeze(-1).expand(-1, -1, class_probs.size(-1)))
+    regression = torch.gather(regression, 1, order.unsqueeze(-1).expand(-1, -1, regression.size(-1)))
+    # Convert our masks (N,M), now in pT order, to be (M,) indices
+    print('post-re-order', masks.shape)
+    # Return the leading regression level variables to be stored at global-level
+    leading_regression = regression[:, 0]
+
+    return leading_regression, masks, class_probs, regression
+
+
 class ONNXModel(ModelWrapper):
-    def __init__(self, name: str | None = None, include_aux: bool = False, **kwargs) -> None:
+    def __init__(self, name: str | None = None, include_aux: bool = False, object_name : str | None = None, mf_config : dict | None =None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = name if name else self.name
         assert len(self.model.init_nets) == 1, "Multi input ONNX models are not yet supported."
@@ -101,10 +164,19 @@ class ONNXModel(ModelWrapper):
         assert "-" not in self.name, "Model name cannot contain dashes."
         self.include_aux = include_aux
         self.const = "tracks"
+        self.object = object_name
+        self.mf_config = MaskformerConfig(**mf_config) if mf_config else None
+        if self.object:
+            self.object_params = {
+                "class_label": self.mf_config.object.class_label,
+                "label_map": [f"p{name}" for name in self.mf_config.object.class_names],
+            }
+            print('OBJECT PARAMS', self.object_params)
         self.input_names = ["jet_features", "track_features"]
         jets, tracks = inputs_sep_no_pad(
             1, 40, self.input_dims[self.global_object], self.input_dims[self.const]
         )
+        self.has_global_task = len([t for t in self.model.tasks if t.input_name == self.global_object]) > 0
         self.example_input_array = jets, tracks.squeeze(0)  # used for the tracing during export
 
     @property
@@ -117,10 +189,12 @@ class ONNXModel(ModelWrapper):
         """The output names are a list of strings, one for each output of the model."""
         # get the global task output
         global_tasks = [t for t in self.model.tasks if t.input_name == self.global_object]
-        assert len(global_tasks) == 1, "Multi global task ONNX models are not yet supported."
-        object_classes = global_tasks[0].class_names
-        outputs = [f"{self.model_name}_p{flav.rstrip('jets')}" for flav in object_classes]
-
+        assert len(global_tasks) <= 1, "Multi global task ONNX models are not yet supported."
+        if self.has_global_task:
+            object_classes = global_tasks[0].class_names
+            outputs = [f"{self.model_name}_p{flav.rstrip('jets')}" for flav in object_classes]
+        else:
+            outputs = []
         # aux task output names
         if self.include_aux:
             if "track_origin" in [t.name for t in self.model.tasks]:
@@ -130,6 +204,22 @@ class ONNXModel(ModelWrapper):
             if "track_vertexing" in [t.name for t in self.model.tasks]:
                 out_name = f"{self.model_name}_VertexIndex"
                 outputs.append(out_name)
+        if self.object:
+            regression_task = [t for t in self.model.tasks 
+                               if t.input_name == 'objects' and t.name == 'regression']
+            assert len(regression_task) == 1, "Object outputs require a regression task"
+            # First we append the leading jet regression variables
+            outputs += [
+                f"{self.model_name}_leading_{self.object}_{v}"
+                for v in regression_task[0].targets]
+            outputs += [f"{self.model_name}_{self.object}_index"]
+            # TODO not hardcoded ?
+            for i in range(5):
+                for reg in regression_task[0].targets:
+                    outputs += [f"{self.model_name}_{self.object}_{i}_{reg}"]
+            print(outputs)
+            # outputs += [f"{self.model_name}_{self.object}_class"]
+            # outputs += [f"{self.model_name}_{self.object}_regression"]
 
         return outputs
 
@@ -147,6 +237,9 @@ class ONNXModel(ModelWrapper):
             if "track_vertexing" in [t.name for t in self.model.tasks]:
                 out_name = f"{self.model_name}_VertexIndex"
                 dynamic_axes[out_name] = {0: "n_tracks"}
+        if self.object:
+            out_name = f"{self.model_name}_{self.object}"
+            dynamic_axes[out_name] = {0: "n_tracks"}
         return dynamic_axes
 
     def forward(self, jets: Tensor, tracks: Tensor, labels=None):  # type: ignore[override]
@@ -159,9 +252,12 @@ class ONNXModel(ModelWrapper):
         outputs = super().forward({self.global_object: jets, self.const: tracks}, None)[0]
 
         # get class probabilities
+        # onnx_outputs = get_probs(
+        #     outputs[self.global_object][f"{self.global_object}_classification"]
+        # )
         onnx_outputs = get_probs(
-            outputs[self.global_object][f"{self.global_object}_classification"]
-        )
+                outputs[self.global_object][f"{self.global_object}_classification"]
+        ) if self.has_global_task else ()
 
         # add aux outputs
         if self.include_aux:
@@ -174,10 +270,49 @@ class ONNXModel(ModelWrapper):
             if "track_vertexing" in track_outs:
                 pad_mask = torch.zeros(tracks.shape[:-1], dtype=torch.bool)
                 edge_scores = track_outs["track_vertexing"]
-                vertex_indices = get_node_assignment(edge_scores, pad_mask)
+                print(edge_scores.shape, flush=True)
+                vertex_indices = get_node_assignment_jit(edge_scores, pad_mask)
                 vertex_list = mask_fill_flattened(vertex_indices, pad_mask)
                 onnx_outputs += (vertex_list.reshape(-1).char(),)
+        if self.object:
+            print('LOL'*100)
+            assert 'objects' in outputs, 'No MF objects in outputs'
+            print(outputs['objects'].keys())
+            print(outputs['objects']['masks'])
+            print(indices_from_mask(outputs['objects']['masks']))
+            print(outputs['objects']['class_probs'])
+            regression_task = [t for t in self.model.tasks if t.input_name == 'objects' and t.name == 'regression']
+            assert len(regression_task) == 1, "Object outputs require a regression task"
+            regression_task = regression_task[0]
 
+            for i, t in enumerate(regression_task.targets):
+                unscaled_preds = regression_task.scaler.inverse(t, outputs['objects']["regression"][:, :, i])
+                outputs['objects']['regression'][:, :, i] = unscaled_preds
+            # outputs['objects']['regression'] = regression_task.run_inference
+            # Extract the mf outputs
+            leading_reg, masks, class_probs, regression = get_maskformer_outputs(outputs['objects'])
+            
+                
+            for r in leading_reg[0]:
+                onnx_outputs += (r,)
+            if masks is None:
+                onnx_outputs += ((torch.ones(40)*torch.nan).char(),)
+            else:
+                print(masks.shape)
+                mask_index = masks_to_index(masks, -99).reshape(-1).char()
+                print("HERE")
+                # pad_mask = torch.zeros(tracks.shape[:-1], dtype=torch.bool)
+                print(mask_index)
+                onnx_outputs += (mask_index,)
+
+            for i in range(len(regression)):
+                for r in regression[i].reshape(-1):
+                    onnx_outputs += (r,)
+            
+            # onnx_
+            # onnx_outputs += (torch.argmax(class_probs, dim=-1).char(),)
+            # onnx_outputs += (regression,)
+        print(onnx_outputs)
         return onnx_outputs
 
 
@@ -190,7 +325,11 @@ def compare_output(pt_model, onnx_session, include_aux, n_track=40):
 
     inputs_pt = {"jets": jets, "tracks": tracks}
     outputs_pt = pt_model(inputs_pt, {"tracks": pad_mask})[0]
-    pred_pt_jc = [p.detach().numpy() for p in get_probs(outputs_pt["jets"]["jets_classification"])]
+    pred_pt_jc = (
+        [p.detach().numpy() for p in get_probs(outputs_pt["jets"]["jets_classification"])]
+        if "jets" in outputs_pt
+        else []
+        )
 
     inputs_onnx = {
         "jet_features": jets.numpy(),
@@ -229,9 +368,10 @@ def compare_output(pt_model, onnx_session, include_aux, n_track=40):
         )
 
     # test vertexing
-    if include_aux:
+    if include_aux and "track_vertexing" in outputs_pt["tracks"]:
+        
         pred_pt_scores = outputs_pt["tracks"]["track_vertexing"].detach()
-        pred_pt_indices = get_node_assignment(pred_pt_scores, pad_mask)
+        pred_pt_indices = get_node_assignment_jit(pred_pt_scores, pad_mask)
         pred_pt_vtx = mask_fill_flattened(pred_pt_indices, pad_mask)
 
         pred_onnx_vtx = outputs_onnx[-1]
@@ -275,29 +415,44 @@ def main(args=None):
     if not (config_path := args.config):
         config_path = args.ckpt_path.parents[1] / "config.yaml"
         assert config_path.is_file(), f"Could not find config file at {config_path}"
-    with open(config_path) as f:
+
+    with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    
 
     # instantiate pytorch and wrapper models
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        print(config['model']['norm_config'])
+
         pt_model = ModelWrapper.load_from_checkpoint(
             args.ckpt_path, map_location=torch.device("cpu"),
-            norm_config=config['model']['norm_config']
+            norm_config=config["model"]["norm_config"],
         )
         pt_model.eval()
         pt_model.float()
 
+        if args.object_name:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            mf_config = config['data'].get('mf_config')
+            if not mf_config:
+                raise ValueError('No mf_config in config')
+        else:
+            mf_config = {}
         onnx_model = ONNXModel.load_from_checkpoint(
             args.ckpt_path,
             name=args.name,
             include_aux=args.include_aux,
+            object_name=args.object_name,
+            mf_config=mf_config,
             map_location=torch.device("cpu"),
-            norm_config=config['model']['norm_config']
+            norm_config=config["model"]["norm_config"],
+
         )
+        print("OUTPUTS", onnx_model.output_names)
         onnx_model.eval()
+        # change_attn_backends(
+        #     onnx_model.model, "torch-math"
+        # )  # Only applies to transformer_v2 layers
 
     print("\n" + "-" * 100)
     print("Converting model to ONNX...")
@@ -316,7 +471,10 @@ def main(args=None):
         input_names=onnx_model.input_names,
         output_names=onnx_model.output_names,
         dynamic_axes=onnx_model.dynamic_axes,
+        # verbose=True,
+        
     )
+    
 
     # add metadata
     add_metadata(
@@ -381,6 +539,7 @@ def add_metadata(
 
     # write metadata as json string
     metadata = {"gnn_config": json.dumps(metadata)}
+    
     for k, v in metadata.items():
         meta = onnx_model.metadata_props.add()
         meta.key = k

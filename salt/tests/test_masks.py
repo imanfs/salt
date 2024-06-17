@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from salt.utils.mask_utils import indices_from_mask, mask_from_indices
+from salt.utils.mask_utils import indices_from_mask, mask_from_indices, masks_to_index
 
 
 @pytest.fixture
@@ -77,3 +77,34 @@ def test_indices_from_mask_empty():
     ])
     indices = indices_from_mask(mask)
     assert torch.all(indices == torch.tensor([[-1, 0], [-1, -1]]))
+
+def test_indices_from_mask_mine_2d():
+
+    mask = torch.tensor([
+        [True, True, False, False, False, False], 
+        [False, False, True, False, False, True]
+    ])
+    indices = masks_to_index(mask)
+    
+    assert torch.all(indices == torch.tensor([0, 0, 1, 2, 3, 1]))
+
+def test_indices_from_mask_mine_3d():
+
+    mask = torch.tensor([
+        [
+            [True, True, False, False, False, False], 
+            [False, False, True, False, False, True]
+        ],
+        [
+            [True, False, False, False, False, True],
+            [False, True, False, True, False, False]
+        ]
+    ])
+    indices = masks_to_index(mask)
+    
+    assert torch.all(
+        indices == torch.tensor([
+            [0, 0, 1, 2, 3, 1],
+            [0, 1, 2, 1, 3, 0]
+            ])
+        )
