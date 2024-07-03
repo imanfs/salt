@@ -112,9 +112,9 @@ def run_onnx(train_dir, args=None):
     args += [f"--ckpt_path={ckpt_path}"]
     args += ["--track_selection=dipsLoose202102"]
 
-    if 'MaskFormer' in str(train_dir):
+    if "MaskFormer" in str(train_dir):
         args += ["-mf=vertexing"]
-    print('ONNX'*100)
+    print("ONNX" * 100)
     print(train_dir)
     # args += args
     to_onnx(args)

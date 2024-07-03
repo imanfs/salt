@@ -77,8 +77,9 @@ def mask_from_indices(indices: Tensor, num_masks: int | None = None) -> BoolTens
 
 
 def indices_from_mask(mask: BoolTensor, noindex: int = -1, first_invalid=None):
-    """Converts a spares bool mask to a dense index tensor, where any
-    index NOT part of a mask is given an increasing index value.
+    """
+    Converts a spares bool mask to a dense index tensor, where any
+    index NOT part of a mask is given an increasing index value. 
 
     Examples
     --------
@@ -127,7 +128,7 @@ def indices_from_mask(mask: BoolTensor, noindex: int = -1, first_invalid=None):
         # by the onnx model, so speed isn't an issue
         indices = torch.full((mask.shape[0], mask.shape[-1]), noindex, **kwargs)
         for i in range(mask.shape[0]):
-            indices[i] = masks_to_index(mask[i])
+            indices[i] = indices_from_mask(mask[i])
         return indices
     raise ValueError("mask must be 2D for single sample or 3D for batch")
 

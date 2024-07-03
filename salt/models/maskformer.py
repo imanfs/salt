@@ -101,7 +101,6 @@ class MaskDecoder(nn.Module):
         # MF only supports one input, if we have multiple then we have no way of knowing
         # what section of the embedding relates to objects we want to generate masks for
         if isinstance(pad_mask, dict):
-        
             assert len(pad_mask) == 1, "Maskformer only supports one input."
             pad_mask = next(iter(pad_mask.values()))
 
@@ -110,9 +109,11 @@ class MaskDecoder(nn.Module):
         q = self.norm1(self.inital_q.expand(x.shape[0], -1, -1))
         x = self.norm2(x)
         xpad = torch.zeros((x.shape[0], 1, x.shape[-1]), device=x.device, dtype=x.dtype)
-        
+
         if pad_mask is not None:
-            padpad_mask = torch.zeros((pad_mask.shape[0], 1), device=pad_mask.device, dtype=pad_mask.dtype)
+            padpad_mask = torch.zeros(
+                (pad_mask.shape[0], 1), device=pad_mask.device, dtype=pad_mask.dtype
+            )
             pad_mask = torch.cat([pad_mask, padpad_mask], dim=1)
 
         x = torch.cat([x, xpad], dim=1)
@@ -125,12 +126,8 @@ class MaskDecoder(nn.Module):
             q, x = layer(q, x, kv_mask=pad_mask)
         mf_preds = self.get_preds(q, x, pad_mask)
 
-        preds["objects"] = {
-            "embed": q, 
-            "x": x[:, :-1, :], 
-            **self.get_preds(q, x, pad_mask)
-            }
-        preds["objects"]["masks"] = preds["objects"]["masks"][:,:,:-1]
+        preds["objects"] = {"embed": q, "x": x[:, :-1, :], **self.get_preds(q, x, pad_mask)}
+        preds["objects"]["masks"] = preds["objects"]["masks"][:, :, :-1]
         if self.aux_loss:
             preds["intermediate_outputs"] = intermediate_outputs
 
@@ -145,12 +142,10 @@ def get_masks(x: Tensor, q: Tensor, mask_net: nn.Module, input_pad_mask: Tensor 
     pred_masks = torch.einsum("bqe,ble->bql", mask_tokens, x)
 
     if input_pad_mask is not None:
-
         t = input_pad_mask.unsqueeze(1).expand_as(pred_masks)
         pred_masks[input_pad_mask.unsqueeze(1).expand_as(pred_masks)] = torch.finfo(
             pred_masks.dtype
         ).min
-
 
     return pred_masks
 
@@ -194,8 +189,6 @@ class MaskDecoderLayer(nn.Module):
             # If so, set them to 1 (equivalent to `True` in boolean)
 
             attn_mask = attn_mask | newmask.bool()
-
-
 
         # update queries with cross attention from nodes
         q = q + self.q_ca(q, kv=kv, kv_mask=kv_mask, attn_mask=attn_mask)
