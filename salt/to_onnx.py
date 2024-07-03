@@ -102,39 +102,72 @@ def get_probs(outputs: Tensor):
 
 
 def get_maskformer_outputs(objects):
-
+    print(objects.keys())
+    print(objects["class_probs"].shape)
     # Convert the (N,M) -> (M,) mask indices
-    masks = objects['masks']
-    class_probs = objects['class_probs']
-    regression = objects['regression']
-    object_leading = objects['regression']
+    masks = objects["masks"]
+    class_probs = objects["class_probs"]
+    regression = objects["regression"]
+    object_leading = objects["regression"]
+    n_tracks = masks.shape[-1]
+    n_obj = masks.shape[1]
+    n_reg = regression.shape[-1]
 
-    # If the null prob is the highest prob, then assume this is a null object
-    null_preds = class_probs[:, :, -1] > 0.5
-    if not null_preds.any():
-        # TODO don't enforce 5 objects or 40 tracks
-        return torch.ones((1,5))*torch.nan, torch.arange(40), class_probs, torch.ones((1,5, 5))*torch.nan
-    
-    # Set default values for null predictions
+    # TODO not enforce == 2
+    if n_tracks == 0:
+        print("lol?")
+        return (
+            torch.ones((1, n_obj)) * torch.nan,
+            None,
+            class_probs,
+            torch.ones((1, n_obj, n_reg)) * torch.nan,
+        )
+    print(class_probs)
+    null_preds = class_probs[:, :, -1] > 0.9
+    print("CLASS PROBS")
+    print(class_probs)
+    # if not null_preds.any():
+    if False:
+        # If we have no predicted objects, we return arange(0,40) for vertex index, and
+        # NaN (check?) for regression values
+
+        return (
+            torch.ones((1, n_obj)) * torch.nan,
+            torch.zeros((1, n_obj, n_tracks), dtype=torch.bool),
+            class_probs,
+            torch.ones((1, n_obj, n_reg)) * torch.nan,
+        )
+    print("lol?", masks.shape)
+    print(null_preds.shape)
+    masks = masks.sigmoid() > 0.5
     object_leading[null_preds] = -999
     regression[null_preds] = np.nan
-
-    # Define the leading object as the one with the highest regression[0] value 
+    expanded_null = null_preds.unsqueeze(-1).expand(-1, -1, masks.size(-1))
+    print("these shapes!", null_preds.shape, masks.shape, expanded_null.shape)
+    # masks[expanded_null] = False
+    # Define the leading object as the one with the highest regression[0] value
     # in vertexing case, this is the pT
-    order = torch.argsort(object_leading[:,:, 0], descending=True)
-    
-    
+    order = torch.argsort(object_leading[:, :, 0], descending=True)
+    order_expanded = order.unsqueeze(-1).expand(-1, -1, masks.size(-1))
+
+    print("pre-re-order", masks.shape)
+
     # Use gather to reorder tensors along a specific dimension
     # TODO check this is working as expected
-    masks = torch.gather(masks, 1, order.unsqueeze(-1).expand(-1, -1, masks.size(-1)))
-    class_probs = torch.gather(class_probs, 1, order.unsqueeze(-1).expand(-1, -1, class_probs.size(-1)))
-    regression = torch.gather(regression, 1, order.unsqueeze(-1).expand(-1, -1, regression.size(-1)))
+    masks = torch.gather(masks, 1, order_expanded)
+    class_probs = torch.gather(
+        class_probs, 1, order.unsqueeze(-1).expand(-1, -1, class_probs.size(-1))
+    )
+    regression = torch.gather(
+        regression, 1, order.unsqueeze(-1).expand(-1, -1, regression.size(-1))
+    )
     # Convert our masks (N,M), now in pT order, to be (M,) indices
-    object_indices = masks_to_index(masks)
+    print("post-re-order", masks.shape)
     # Return the leading regression level variables to be stored at global-level
     leading_regression = regression[:, 0]
 
-    return leading_regression, object_indices, class_probs, regression
+    obj_indices = masks_to_index(masks)
+    return leading_regression, obj_indices, class_probs, regression
 
 
 class ONNXModel(ModelWrapper):
@@ -262,8 +295,7 @@ class ONNXModel(ModelWrapper):
             for r in leading_reg[0]:
                 onnx_outputs += (r,)
             onnx_outputs += (indices.reshape(-1).char(),)
-            # onnx_outputs += (torch.argmax(class_probs, dim=-1).char(),)
-            # onnx_outputs += (regression,)
+ 
         print(onnx_outputs)
         return onnx_outputs
 
