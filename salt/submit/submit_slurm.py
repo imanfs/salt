@@ -9,6 +9,9 @@ parser = argparse.ArgumentParser(description="Submit batch jobs to Slurm.")
 parser.add_argument("-c", "--config", required=True, type=Path, help="Configuration file for job.")
 parser.add_argument("-t", "--tag", default="salt_job", help="Tag for job to be submitted.")
 parser.add_argument("-p", "--partition", default=None, type=str, help="Partition to submit job.")
+parser.add_argument(
+    "-cn", "--constraint", default=None, type=str, help="Constraint on requested resources."
+)
 parser.add_argument("-a", "--account", default=None, type=str, help="Slurm account name.")
 parser.add_argument(
     "-e",
@@ -17,6 +20,7 @@ parser.add_argument(
     choices=["conda", "singularity", "local"],
     help="Environment for job to be submitted.",
 )
+parser.add_argument("-q", "--qos", default=None, type=str, help="Quality Of Service for job")
 parser.add_argument("-n", "--nodes", default=1, type=int, help="Nodes to split training across")
 parser.add_argument("-g", "--gpus_per_node", default=1, type=int, help="GPUs for each node")
 parser.add_argument(
@@ -51,7 +55,26 @@ parser.add_argument(
     default=None,
     help="Appended to model name to create Salt log directory",
 )
-args = parser.parse_args()
+args, extra_args = parser.parse_known_args()
+
+# Manually parse extra args not explicitly handled for passing to Salt and Slurm
+extra_slurm_args = {}
+extra_config_args = {}
+for extra_arg in extra_args:
+    dest_argument = extra_arg.lstrip("-")
+    dest = dest_argument.split(".")[0]
+    argument = ".".join(dest_argument.split(".")[1:])
+    if "=" not in argument:
+        name = argument
+        value = None
+    else:
+        name, value = argument.split("=")
+    if dest == "slurm":
+        extra_slurm_args[name] = value
+    elif dest == "config":
+        extra_config_args[name] = value
+    else:
+        raise ValueError(f'Extra argument provided but unknown destination "{dest}"')
 
 if args.bind and args.environment != "singularity":
     parser.error("--bind option is only allowed with --environment singularity")
@@ -77,12 +100,17 @@ handler = SlurmHandler(str(batch_path), str(log_path), str(job_basedir))
 handler["job-name"] = args.tag
 if args.partition is not None:
     handler["partition"] = args.partition
+if args.constraint is not None:
+    handler["constraint"] = args.constraint
 if args.account is not None:
     handler["account"] = args.account
+if args.qos is not None:
+    handler["qos"] = args.qos
 handler["nodes"] = nodes
 handler["gres"] = gres
 handler["ntasks-per-node"] = gpus_per_node
-handler["mem"] = args.memory  # memory, 100 GiB - in MiB
+if args.memory is not None:
+    handler["mem"] = args.memory  # memory, 100 GiB - in MiB
 if args.exclusive:
     handler["exclusive"] = None  # Exclusive access to nodes
 handler["cpus-per-task"] = cpus_per_task  # Don't use this if you have exclusive access to the node
@@ -94,6 +122,10 @@ if args.time is not None:
 if args.requeue:
     handler["requeue"] = None
     handler["signal"] = args.signal
+# Fill extra Slurm args
+for arg, value in extra_slurm_args.items():
+    handler[arg] = value
+
 
 log_suffix = args.salt_log_suffix
 if args.requeue and not log_suffix:
@@ -119,17 +151,24 @@ command += (
     "cat /proc/cpuinfo | awk '/^processor/{print $3}' | tail -1 &&\n"
     "cd ${BASEDIR}/salt && pwd &&\n"
     + ("srun " if args.environment == "conda" else "")
-    + f"salt fit --config {args.config.resolve()} "
-    f"--trainer.devices={gpus_per_node} "
-    f"--trainer.num_nodes={nodes} "
-    f"--data.num_workers={cpus_per_task} "
+    + f"salt fit --config {args.config.resolve()} \\\n"
+    f"      --trainer.devices={gpus_per_node} \\\n"
+    f"      --trainer.num_nodes={nodes} \\\n"
+    f"      --data.num_workers={cpus_per_task} \\\n"
 )
 
 if args.requeue:
-    command += f"--overwrite_config --log_suffix={log_suffix} "
+    command += f"      --overwrite_config \\\n" f"      --log_suffix={log_suffix} \\\n"
+
+# Fill extra args to Salt config
+for arg, value in extra_config_args.items():
+    if value is not None:
+        command += f"      --{arg}={value} \\\n"
+    else:
+        command += f"      --{arg} \\\n"
 
 if args.force:
-    command += "--force "
+    command += "      --force"
 if args.environment == "singularity":
     command += '"'
 
