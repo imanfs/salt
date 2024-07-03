@@ -21,7 +21,7 @@ from salt.utils.union_find import get_node_assignment_jit
 from salt.utils.cli import SaltCLI
 from salt.utils.inputs import inputs_sep_no_pad, inputs_sep_with_pad
 from salt.utils.union_find import get_node_assignment
-from salt.utils.mask_utils import indices_from_mask
+from salt.utils.mask_utils import masks_to_index
 from salt.utils.configs import MaskformerConfig
 torch.manual_seed(42)
 # https://gitlab.cern.ch/atlas/athena/-/blob/master/PhysicsAnalysis/JetTagging/FlavorTagDiscriminants/Root/DataPrepUtilities.cxx
@@ -102,23 +102,23 @@ def get_probs(outputs: Tensor):
 
 
 def get_maskformer_outputs(objects):
-    print(objects.keys())
-    print(objects['class_probs'].shape)
+
     # Convert the (N,M) -> (M,) mask indices
     masks = objects['masks']
     class_probs = objects['class_probs']
     regression = objects['regression']
     object_leading = objects['regression']
 
-    # TODO not enforce == 2
+    # If the null prob is the highest prob, then assume this is a null object
     null_preds = class_probs[:, :, -1] > 0.5
     if not null_preds.any():
-        # If we have no predicted objects, we return arange(0,40) for vertex index, and
-        # NaN (check?) for regression values
-
+        # TODO don't enforce 5 objects or 40 tracks
         return torch.ones((1,5))*torch.nan, torch.arange(40), class_probs, torch.ones((1,5, 5))*torch.nan
+    
+    # Set default values for null predictions
     object_leading[null_preds] = -999
     regression[null_preds] = np.nan
+
     # Define the leading object as the one with the highest regression[0] value 
     # in vertexing case, this is the pT
     order = torch.argsort(object_leading[:,:, 0], descending=True)
@@ -130,12 +130,11 @@ def get_maskformer_outputs(objects):
     class_probs = torch.gather(class_probs, 1, order.unsqueeze(-1).expand(-1, -1, class_probs.size(-1)))
     regression = torch.gather(regression, 1, order.unsqueeze(-1).expand(-1, -1, regression.size(-1)))
     # Convert our masks (N,M), now in pT order, to be (M,) indices
-    object_indices = indices_from_mask(masks)
-    print(regression[:, :, 0])
+    object_indices = masks_to_index(masks)
     # Return the leading regression level variables to be stored at global-level
     leading_regression = regression[:, 0]
 
-    return leading_regression, masks, class_probs, regression
+    return leading_regression, object_indices, class_probs, regression
 
 
 class ONNXModel(ModelWrapper):
@@ -195,9 +194,7 @@ class ONNXModel(ModelWrapper):
             outputs += [
                 f"{self.model_name}_leading_{self.object}_{v}"
                 for v in regression_task[0].targets]
-            outputs += [f"{self.model_name}_{self.object}_index"]
-            # outputs += [f"{self.model_name}_{self.object}_class"]
-            # outputs += [f"{self.model_name}_{self.object}_regression"]
+            outputs += [f"{self.model_name}_{self.object}Index"]
 
         return outputs
 
@@ -229,10 +226,6 @@ class ONNXModel(ModelWrapper):
         # forward pass
         outputs = super().forward({self.global_object: jets, self.const: tracks}, None)[0]
 
-        # get class probabilities
-        # onnx_outputs = get_probs(
-        #     outputs[self.global_object][f"{self.global_object}_classification"]
-        # )
         onnx_outputs = get_probs(
                 outputs[self.global_object][f"{self.global_object}_classification"]
         ) if self.has_global_task else ()
@@ -248,31 +241,27 @@ class ONNXModel(ModelWrapper):
             if "track_vertexing" in track_outs:
                 pad_mask = torch.zeros(tracks.shape[:-1], dtype=torch.bool)
                 edge_scores = track_outs["track_vertexing"]
-                print(edge_scores.shape, flush=True)
                 vertex_indices = get_node_assignment_jit(edge_scores, pad_mask)
                 vertex_list = mask_fill_flattened(vertex_indices, pad_mask)
                 onnx_outputs += (vertex_list.reshape(-1).char(),)
+
         if self.object:
-            print('LOL'*100)
             assert 'objects' in outputs, 'No MF objects in outputs'
-            print(outputs['objects'].keys())
-            print(outputs['objects']['masks'])
-            print(indices_from_mask(outputs['objects']['masks']))
-            print(outputs['objects']['class_probs'])
             regression_task = [t for t in self.model.tasks if t.input_name == 'objects' and t.name == 'regression']
             assert len(regression_task) == 1, "Object outputs require a regression task"
             regression_task = regression_task[0]
 
+            # Get the (hopefully) correctly (un)scaled regression predictions
             for i, t in enumerate(regression_task.targets):
                 unscaled_preds = regression_task.scaler.inverse(t, outputs['objects']["regression"][:, :, i])
                 outputs['objects']['regression'][:, :, i] = unscaled_preds
-            # outputs['objects']['regression'] = regression_task.run_inference
+
             # Extract the mf outputs
-            leading_reg, masks, class_probs, regression = get_maskformer_outputs(outputs['objects'])
+            leading_reg, indices, class_probs, regression = get_maskformer_outputs(outputs['objects'])
             
             for r in leading_reg[0]:
                 onnx_outputs += (r,)
-            onnx_outputs += (indices_from_mask(masks).reshape(-1).char(),)
+            onnx_outputs += (indices.reshape(-1).char(),)
             # onnx_outputs += (torch.argmax(class_probs, dim=-1).char(),)
             # onnx_outputs += (regression,)
         print(onnx_outputs)
