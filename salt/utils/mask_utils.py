@@ -76,9 +76,8 @@ def mask_from_indices(indices: Tensor, num_masks: int | None = None) -> BoolTens
     return mask
 
 
-def masks_to_index(mask: BoolTensor, noindex: int = -1, first_invalid=None):
-    """
-    Converts a spares bool mask to a dense index tensor, where any
+def indices_from_mask(mask: BoolTensor, noindex: int = -1, first_invalid=None):
+    """Converts a spares bool mask to a dense index tensor, where any
     index NOT part of a mask is given an increasing index value.
 
     Examples
@@ -104,7 +103,7 @@ def masks_to_index(mask: BoolTensor, noindex: int = -1, first_invalid=None):
         # The idx of all indices that are part of a mask
         if mask.shape[-1] == 0:
             return torch.arange(mask.shape[-1], **kwargs)
-       
+
         idx_exist = indices >= 0
         if idx_exist.any():
             min_val = torch.min(indices[idx_exist]).item()
