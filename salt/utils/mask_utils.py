@@ -77,9 +77,8 @@ def mask_from_indices(indices: Tensor, num_masks: int | None = None) -> BoolTens
 
 
 def indices_from_mask(mask: BoolTensor, noindex: int = -1, first_invalid=None):
-    """
-    Converts a spares bool mask to a dense index tensor, where any
-    index NOT part of a mask is given an increasing index value. 
+    """Converts a spares bool mask to a dense index tensor, where any
+    index NOT part of a mask is given an increasing index value.
 
     Examples
     --------

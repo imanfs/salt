@@ -126,7 +126,7 @@ class MaskDecoder(nn.Module):
             q, x = layer(q, x, kv_mask=pad_mask)
         mf_preds = self.get_preds(q, x, pad_mask)
 
-        preds["objects"] = {"embed": q, "x": x[:, :-1, :], **self.get_preds(q, x, pad_mask)}
+        preds["objects"] = {"embed": q, "x": x[:, :-1, :], **mf_preds}
         preds["objects"]["masks"] = preds["objects"]["masks"][:, :, :-1]
         if self.aux_loss:
             preds["intermediate_outputs"] = intermediate_outputs

@@ -67,7 +67,14 @@ def test_indices_from_mask_3d(mask_3d, indices_2d):
 
 
 def test_indices_from_mask_empty():
-    mask = torch.tensor([[False, False,], [False, False], [False, False]])
+    mask = torch.tensor([
+        [
+            False,
+            False,
+        ],
+        [False, False],
+        [False, False],
+    ])
     indices = indices_from_mask(mask)
     assert torch.all(indices == torch.tensor([1, 2]))
 
