@@ -102,8 +102,7 @@ def get_probs(outputs: Tensor):
 
 
 def get_maskformer_outputs(objects):
-    print(objects.keys())
-    print(objects["class_probs"].shape)
+
     # Convert the (N,M) -> (M,) mask indices
     masks = objects["masks"]
     class_probs = objects["class_probs"]
@@ -113,44 +112,34 @@ def get_maskformer_outputs(objects):
     n_obj = masks.shape[1]
     n_reg = regression.shape[-1]
 
-    # TODO not enforce == 2
+    # If we have a jet with no tracks, 
     if n_tracks == 0:
-        print("lol?")
         return (
             torch.ones((1, n_obj)) * torch.nan,
             None,
             class_probs,
             torch.ones((1, n_obj, n_reg)) * torch.nan,
         )
-    print(class_probs)
+    # For testing purposes - this will likely blow up our fake rate
     null_preds = class_probs[:, :, -1] > 0.9
-    print("CLASS PROBS")
-    print(class_probs)
-    # if not null_preds.any():
-    if False:
-        # If we have no predicted objects, we return arange(0,40) for vertex index, and
-        # NaN (check?) for regression values
-
+    if not null_preds.any():
+        # If we have no predicted objects, we return dummy values
         return (
             torch.ones((1, n_obj)) * torch.nan,
             torch.zeros((1, n_obj, n_tracks), dtype=torch.bool),
             class_probs,
             torch.ones((1, n_obj, n_reg)) * torch.nan,
         )
-    print("lol?", masks.shape)
-    print(null_preds.shape)
+
     masks = masks.sigmoid() > 0.5
     object_leading[null_preds] = -999
     regression[null_preds] = np.nan
     expanded_null = null_preds.unsqueeze(-1).expand(-1, -1, masks.size(-1))
-    print("these shapes!", null_preds.shape, masks.shape, expanded_null.shape)
-    # masks[expanded_null] = False
+
     # Define the leading object as the one with the highest regression[0] value
     # in vertexing case, this is the pT
     order = torch.argsort(object_leading[:, :, 0], descending=True)
     order_expanded = order.unsqueeze(-1).expand(-1, -1, masks.size(-1))
-
-    print("pre-re-order", masks.shape)
 
     # Use gather to reorder tensors along a specific dimension
     # TODO check this is working as expected
@@ -161,12 +150,12 @@ def get_maskformer_outputs(objects):
     regression = torch.gather(
         regression, 1, order.unsqueeze(-1).expand(-1, -1, regression.size(-1))
     )
-    # Convert our masks (N,M), now in pT order, to be (M,) indices
-    print("post-re-order", masks.shape)
-    # Return the leading regression level variables to be stored at global-level
+    # Define the leading object as that with the highest [0] (pt for vertexing)
     leading_regression = regression[:, 0]
-
+    
+    # Convert our masks (N,M), now in pT order, to be (M,) indices
     obj_indices = masks_to_index(masks)
+
     return leading_regression, obj_indices, class_probs, regression
 
 
@@ -296,7 +285,7 @@ class ONNXModel(ModelWrapper):
                 onnx_outputs += (r,)
             onnx_outputs += (indices.reshape(-1).char(),)
  
-        print(onnx_outputs)
+
         return onnx_outputs
 
 
