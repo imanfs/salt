@@ -63,6 +63,12 @@ model:
               mask_dice: 2.0
               regression: 2.0
 
+            matcher_weights:
+              object_class_ce: 2.0
+              mask_ce: 10.0
+              mask_dice: 2.0
+              regression: 2.0
+
       pool_net:
         class_path: salt.models.GlobalAttentionPooling #pooled = embed_dim
         init_args: { input_size: *embed_dim }
