@@ -6,6 +6,7 @@ from torch import Tensor, nn
 from salt.models import MaskFormerLoss
 from salt.models.transformer_v2 import GLU, Attention
 from salt.stypes import Tensors
+from salt.utils.mask_utils import indices_from_mask
 
 
 class MaskDecoder(nn.Module):
@@ -108,15 +109,15 @@ class MaskDecoder(nn.Module):
         # apply norm
         q = self.norm1(self.inital_q.expand(x.shape[0], -1, -1))
         x = self.norm2(x)
-        xpad = torch.zeros((x.shape[0], 1, x.shape[-1]), device=x.device, dtype=x.dtype)
 
+        # Add a dummy track to the inputs (and to pad mask) to stop onnx complaining
+        xpad = torch.zeros((x.shape[0], 1, x.shape[-1]), device=x.device, dtype=x.dtype)
+        x = torch.cat([x, xpad], dim=1)
         if pad_mask is not None:
             padpad_mask = torch.zeros(
                 (pad_mask.shape[0], 1), device=pad_mask.device, dtype=pad_mask.dtype
             )
             pad_mask = torch.cat([pad_mask, padpad_mask], dim=1)
-
-        x = torch.cat([x, xpad], dim=1)
 
         intermediate_outputs: list | None = [] if self.aux_loss else None
         for layer in self.layers:
@@ -126,6 +127,7 @@ class MaskDecoder(nn.Module):
             q, x = layer(q, x, kv_mask=pad_mask)
         mf_preds = self.get_preds(q, x, pad_mask)
 
+        # Un-pad the embedding x, get the mf_predictions, and then unpad them as well
         preds["objects"] = {"embed": q, "x": x[:, :-1, :], **mf_preds}
         preds["objects"]["masks"] = preds["objects"]["masks"][:, :, :-1]
         if self.aux_loss:
@@ -142,12 +144,78 @@ def get_masks(x: Tensor, q: Tensor, mask_net: nn.Module, input_pad_mask: Tensor 
     pred_masks = torch.einsum("bqe,ble->bql", mask_tokens, x)
 
     if input_pad_mask is not None:
-        t = input_pad_mask.unsqueeze(1).expand_as(pred_masks)
         pred_masks[input_pad_mask.unsqueeze(1).expand_as(pred_masks)] = torch.finfo(
             pred_masks.dtype
         ).min
 
     return pred_masks
+
+
+def get_maskformer_outputs(
+    objects,
+    max_null=0.9,
+    apply_reorder=True,
+):
+    """Takes objects for a single MF global prediction and converts them to a more useful
+    form.
+
+        -  Keep only objects which have `pnull < max_null`
+        - Converts the mask logits to mask indices, see salt.utils.mask_utils.indices_from_mask
+
+    """
+    # Convert the (N,M) -> (M,) mask indices
+    masks = objects["masks"]
+    class_probs = objects["class_probs"]
+    regression = objects["regression"]
+    object_leading = objects["regression"]
+    n_tracks = masks.shape[-1]
+    n_obj = masks.shape[1]
+    n_reg = regression.shape[-1]
+
+    # If we have a jet with no tracks,
+    if n_tracks == 0:
+        return (
+            torch.ones((1, n_obj)) * torch.nan,
+            None,
+            class_probs,
+            torch.ones((1, n_obj, n_reg)) * torch.nan,
+        )
+    # For testing purposes - this will likely blow up our fake rate
+    null_preds = class_probs[:, :, -1] > max_null
+    if not null_preds.any():
+        # If we have no predicted objects, we return dummy values
+        return (
+            torch.ones((1, n_obj)) * torch.nan,
+            torch.zeros((1, n_obj, n_tracks), dtype=torch.bool),
+            class_probs,
+            torch.ones((1, n_obj, n_reg)) * torch.nan,
+        )
+
+    masks = masks.sigmoid() > 0.5
+    object_leading[null_preds] = -999
+    regression[null_preds] = torch.nan
+
+    if apply_reorder:
+        # Define the leading object as the one with the highest regression[0] value
+        # in vertexing case, this is the pT
+        order = torch.argsort(object_leading[:, :, 0], descending=True)
+        order_expanded = order.unsqueeze(-1).expand(-1, -1, masks.size(-1))
+
+        # Use gather to reorder tensors along a specific dimension
+        masks = torch.gather(masks, 1, order_expanded)
+        class_probs = torch.gather(
+            class_probs, 1, order.unsqueeze(-1).expand(-1, -1, class_probs.size(-1))
+        )
+        regression = torch.gather(
+            regression, 1, order.unsqueeze(-1).expand(-1, -1, regression.size(-1))
+        )
+        # Define the leading object as that with the highest [0] (pt for vertexing)
+    leading_regression = regression[:, 0]
+
+    # Convert our masks (N,M), now in pT order, to be (M,) indices
+    obj_indices = indices_from_mask(masks)
+
+    return leading_regression, obj_indices, class_probs, regression
 
 
 class MaskDecoderLayer(nn.Module):
@@ -184,11 +252,11 @@ class MaskDecoderLayer(nn.Module):
 
             # Threshold and detach
             attn_mask = (attn_mask > 0.9).detach()
-            newmask = torch.all(attn_mask == 0, dim=-1, keepdim=True).expand(attn_mask.shape)
             # Check if all values along the last dimension are 0 (equivalent to `False` in boolean)
             # If so, set them to 1 (equivalent to `True` in boolean)
+            newmask = torch.all(attn_mask == 0, dim=-1, keepdim=True).expand(attn_mask.shape)
 
-            attn_mask = attn_mask | newmask.bool()
+            attn_mask = attn_mask | newmask
 
         # update queries with cross attention from nodes
         q = q + self.q_ca(q, kv=kv, kv_mask=kv_mask, attn_mask=attn_mask)

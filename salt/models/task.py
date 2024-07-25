@@ -345,7 +345,7 @@ class RegressionTask(RegressionTaskBase):
                 preds[:, i] = preds[:, i] * self.norm_params["std"][i] + self.norm_params["mean"][i]
         elif self.scaler is not None:
             for i in range(len(self.targets)):
-                preds[:, i] = self.scaler.inverse(self.targets[i], preds[:, i])
+                preds[:, :, i] = self.scaler.inverse(self.targets[i], preds[:, :, i])
         dtype = np.dtype([(f"{self.name}_{t}", precision) for t in self.targets])
         return u2s(preds.float().cpu().numpy(), dtype)
 

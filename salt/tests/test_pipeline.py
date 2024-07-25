@@ -29,9 +29,9 @@ def run_train(tmp_path, config_path, train_args, do_xbb=False, do_muP=False, inc
     args += [f"--data.class_dict={cd_path}"]
     args += [f"--data.train_file={train_h5_path}"]
     args += [f"--data.val_file={train_h5_path}"]
-    args += ["--data.num_train=50"]
-    args += ["--data.num_val=20"]
-    args += ["--data.batch_size=10"]
+    args += ["--data.num_train=500"]
+    args += ["--data.num_val=200"]
+    args += ["--data.batch_size=100"]
     args += ["--data.num_workers=0"]
     args += ["--trainer.max_epochs=1"]
     args += ["--trainer.accelerator=cpu"]
@@ -65,7 +65,6 @@ def run_eval(tmp_path, train_config_path, nd_path, do_xbb=False):
 
     args += [f"--config={train_config_path}"]
     args += [f"--data.test_file={test_h5_path}"]
-    args += ["--data.batch_size=100"]
     args += ["--data.num_test=1000"]
     main(args)
 
@@ -112,11 +111,6 @@ def run_onnx(train_dir, args=None):
     args += [f"--ckpt_path={ckpt_path}"]
     args += ["--track_selection=dipsLoose202102"]
 
-    if "MaskFormer" in str(train_dir):
-        args += ["-mf=vertexing"]
-    print("ONNX" * 100)
-    print(train_dir)
-    # args += args
     to_onnx(args)
     get_onnx_metadata([str(train_dir / "network.onnx")])
 
@@ -266,7 +260,7 @@ def test_tfv2(tmp_path) -> None:
 
 @pytest.mark.filterwarnings(w)
 def test_maskformer(tmp_path) -> None:
-    run_combined(tmp_path, "MaskFormer.yaml", train_args=None)
+    run_combined(tmp_path, "MaskFormer.yaml", train_args=None, export_args=["-mf=vertexing"])
 
 
 @pytest.mark.filterwarnings(w)

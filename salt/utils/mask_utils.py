@@ -76,23 +76,26 @@ def mask_from_indices(indices: Tensor, num_masks: int | None = None) -> BoolTens
     return mask
 
 
-def indices_from_mask(mask: BoolTensor, noindex: int = -1, first_invalid=None):
-    """Converts a spares bool mask to a dense index tensor, where any
-    index NOT part of a mask is given an increasing index value.
+def indices_from_mask(mask: BoolTensor, noindex: int = -2) -> Tensor:
+    """Convert a sparse bool mask to a dense index tensor.
+
+    Indices are arbitrary and start from 0.
 
     Examples
     --------
-    [
-        [True, True, False, False, False, False],
-        [False, False, True, False, False, True]
-    ] -> [0, 0, 1, 2, 3, 1]
+    [[True, False, False], [False, True, True]] -> [0, 1, 1]
 
     Parameters
     ----------
     mask : BoolTensor
         The sparse mask
     noindex : int
+        The value to use for no index
 
+    Returns
+    -------
+    Tensor
+        The dense indices
     """
     mask = torch.as_tensor(mask)
     kwargs = {"dtype": torch.long, "device": mask.device}
@@ -100,36 +103,22 @@ def indices_from_mask(mask: BoolTensor, noindex: int = -1, first_invalid=None):
         indices = torch.ones(mask.shape[-1], **kwargs) * noindex
         nonzero_idx = torch.where(mask)
         indices[nonzero_idx[1]] = nonzero_idx[0]
-        # The idx of all indices that are part of a mask
-        if mask.shape[-1] == 0:
-            return torch.arange(mask.shape[-1], **kwargs)
+    elif mask.ndim == 3:
+        indices = torch.ones((mask.shape[0], mask.shape[-1]), **kwargs) * noindex
+        nonzero_idx = torch.where(mask)
+        indices[nonzero_idx[0], nonzero_idx[2]] = nonzero_idx[1]
+    else:
+        raise ValueError("mask must be 2D for single sample or 3D for batch")
 
-        idx_exist = indices >= 0
-        if idx_exist.any():
-            min_val = torch.min(indices[idx_exist]).item()
-            indices[idx_exist] = indices[idx_exist] - min_val
-            if first_invalid:
-                max_val = first_invalid
-            else:
-                max_val = torch.max(indices[idx_exist]).item()
-        else:
-            min_val = 0  # Default value if the tensor is empty
-            max_val = 0
+    idx_exist = indices >= 0
+    minval = torch.min(indices[idx_exist]).item() if idx_exist.any() else 0
 
-        neg_ind = torch.where(indices < 0)[0]
-        if len(neg_ind) == 0:
-            return indices
-        replacement_vals = torch.arange(max_val + 1, max_val + 1 + neg_ind.shape[0])
-        indices[neg_ind] = replacement_vals
-        return indices
-    if mask.ndim == 3:
-        # Not a fan, but CBA to do this properly for now as its only used
-        # by the onnx model, so speed isn't an issue
-        indices = torch.full((mask.shape[0], mask.shape[-1]), noindex, **kwargs)
-        for i in range(mask.shape[0]):
-            indices[i] = indices_from_mask(mask[i])
-        return indices
-    raise ValueError("mask must be 2D for single sample or 3D for batch")
+    neg_indices = torch.where(indices < 0)
+    # ensure indices start from 0
+    indices[idx_exist] -= minval
+    indices[neg_indices] = noindex
+
+    return indices
 
 
 def sanitise_mask(

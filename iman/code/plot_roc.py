@@ -5,7 +5,7 @@ from ftag.hdf5 import H5Reader
 from puma import Roc, RocPlot
 from puma.metrics import calc_rej
 
-logs_dir = "/home/xucabis2/salt/salt/logs"
+logs_dir = "/home/xucabis2/salt/logs"
 ckpt = "epoch=019-val_loss=0.64715__test_ttbar.h5"
 fname = f"{logs_dir}/MF_16workers_10kbatch_20240710-T103121/ckpts/{ckpt}"
 h5file = h5py.File(fname, "r")

@@ -27,6 +27,12 @@ def plot_residuals(fname_preds, fname_truth, var_name, cuts=None, norm=False):
 
     objects = h5preds["objects"]  # hadrons
     reg_preds = objects["regression"]  # truth hadron regression predictions
+    if "arxiv" in fname_preds:
+        tag = "arxiv"
+    elif "default" in fname_preds:
+        tag = "default"
+    elif "equal" in fname_preds:
+        tag = "equal"
 
     # get truth hadrons from truth file
     truth_hadrons = h5truth["truth_hadrons"]
@@ -87,9 +93,8 @@ def plot_residuals(fname_preds, fname_truth, var_name, cuts=None, norm=False):
         norm_val = "norm" if norm else "unnorm"
         plot_histo.add(hist, reference=True)
         plot_histo.draw()
-        plot_name = (
-            f"/home/xucabis2/salt/plots/{norm_val}/residuals_{var_name}_{cut_name}_{norm_val}.png"
-        )
+        plot_dir = "/home/xucabis2/salt/iman/plots"
+        plot_name = f"{plot_dir}/{norm_val}/{tag}_residuals_{var_name}_{cut_name}_{norm_val}.png"
         print("Saving to ", plot_name)
         plot_histo.savefig(plot_name, transparent=False)
 
@@ -98,11 +103,23 @@ def plot_residuals(fname_preds, fname_truth, var_name, cuts=None, norm=False):
 # MaskFormer_interactive_20240711-T110901/ckpts/
 # epoch=019-val_loss=0.65825__test_ttbar.h5"
 
-logs_dir = "/home/xucabis2/logs"
+logs_dir = "/home/xucabis2/salt/logs"
 test_dir = "/home/xzcappon/phd/datasets"
-ckpt = "epoch=019-val_loss=0.64715__test_ttbar.h5"
-fname_preds = f"{logs_dir}/MaskFormer_interactive_20240714-T230202/ckpts/{ckpt}"
+ckpt = "epoch=019-val_loss=0.65962__test_ttbar.h5"
+fname_preds = f"{logs_dir}/MaskFormer_arxiv_20240724-T114414/ckpts/{ckpt}"
+fname_truth = f"{test_dir}/vertexing_120m/output/pp_output_test_ttbar.h5"
+
+logs_dir = "/home/xucabis2/salt/logs"
+test_dir = "/home/xzcappon/phd/datasets"
+ckpt_arxiv = "epoch=019-val_loss=0.65962__test_ttbar.h5"
+ckpt_default = "epoch=019-val_loss=0.65355__test_ttbar.h5"
+ckpt_equal = "epoch=019-val_loss=0.64428__test_ttbar.h5"
+fname_arxiv = f"{logs_dir}/MaskFormer_arxiv_20240724-T114414/ckpts/{ckpt_arxiv}"
+fname_default = f"{logs_dir}/MaskFormer_default_20240724-T112538/ckpts/{ckpt_default}"
+fname_equal = f"{logs_dir}/MaskFormer_equal_20240724-T114419/ckpts/{ckpt_equal}"
 fname_truth = f"{test_dir}/vertexing_120m/output/pp_output_test_ttbar.h5"
 
 cuts = [(0, 0.1), (0.1, 1), (1, 5), (5, np.inf)]
-plot_residuals(fname_preds, fname_truth, "pt", norm=False)
+fnames = [fname_arxiv, fname_default, fname_equal]
+for fname in fnames:
+    plot_residuals(fname, fname_truth, "deta", norm=False)

@@ -201,6 +201,7 @@ trainer:
   accelerator: gpu
   devices: 1
   precision: 16-mixed
+  default_root_dir: ~/salt/logs
   callbacks:
     - class_path: salt.callbacks.Checkpoint
       init_args:
