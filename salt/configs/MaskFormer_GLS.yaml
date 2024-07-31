@@ -1,4 +1,4 @@
-name: MaskFormer_arxiv
+name: MaskFormer_GLS
 
 model:
   lrs_config:
@@ -32,7 +32,7 @@ model:
 
 
       mask_decoder:
-        class_path: salt.models.maskformer.MaskDecoder
+        class_path: salt.models.maskformer_iman.MaskDecoderIman
         init_args:
           num_objects: 5
           embed_dim: *embed_dim
@@ -56,12 +56,13 @@ model:
               output_size: *embed_dim
 
           loss_config:
+            weighting: GLS
             num_classes: 2
             loss_weights:
-              object_class_ce: 0.5
-              mask_ce: 12.0
-              mask_dice: 8.0
-              regression: 2.0
+              object_class_ce: 1.0
+              mask_ce: 1.0
+              mask_dice: 1.0
+              regression: 1.0
 
             matcher_weights:
               object_class_ce: 2.0
@@ -207,6 +208,7 @@ trainer:
   accelerator: gpu
   devices: 1
   precision: 16-mixed
+  default_root_dir: logs
   callbacks:
     - class_path: salt.callbacks.Checkpoint
       init_args:

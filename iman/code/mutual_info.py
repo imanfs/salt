@@ -1,4 +1,5 @@
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import mutual_info_score
 from utils import h5py_read
@@ -28,6 +29,18 @@ def calculate_pairwise_mi(primary, aux, n_bins=10):
     return mi_matrix
 
 
+def plot_mi(primary, aux, n_bins_values):
+    mutual_info_values = []
+    for n_bins in n_bins_values:
+        mutual_info = calculate_mutual_information(primary, aux, n_bins)
+        mutual_info_values.append(mutual_info)
+
+    plt.plot(n_bins_values, mutual_info_values)
+    plt.xlabel("Number of Bins")
+    plt.ylabel("Mutual Information")
+    plt.show()
+
+
 def main():
     # File paths and dataset names
     # i think only use the test set here
@@ -49,10 +62,14 @@ def main():
     # had_is_b = df["flavour"] == 5
 
     # Calculate pairwise mutual information between columns
-    n_bins = 10_000  # You can adjust this value
-    pairwise_mi = calculate_mutual_information(primary_data, aux_data, n_bins)
+    n_bins = 10_000
+    mutual_info = calculate_mutual_information(primary_data, aux_data, n_bins)
+    # pairwise_mi = calculate_pairwise_mi(primary_data, aux_data, n_bins)
     print(f"{aux_label} Mutual Information ({n_bins} bins):")
-    print(pairwise_mi)
+    print(mutual_info)
+
+    n_bins_values = [10, 100, 1000, 10000]
+    plot_mi(primary_data, aux_data, n_bins_values)
 
 
 if __name__ == "__main__":

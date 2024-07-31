@@ -1,3 +1,4 @@
+import datetime
 import warnings
 
 import h5py
@@ -18,7 +19,7 @@ def calc_residuals(x_true, x_pred, norm=True):
     residuals = x_pred - x_true
     if norm:
         residuals = residuals / x_true
-        residuals[abs(residuals) > 1e4] = 0
+    residuals[abs(residuals) > 1e4] = 0
     # residuals[np.isnan(residuals)] = 0
     residuals[np.isinf(residuals)] = 0
     return residuals
@@ -70,6 +71,11 @@ def extract_MF_name(path):
             return ""
     else:
         return ""
+
+
+def get_timestamp():
+    now = datetime.datetime.now()
+    return now.strftime("%Y%m%d")
 
 
 def object_residuals(fnames_preds, fname_truth, var_name, cut_range=None, norm=False):
@@ -134,7 +140,8 @@ def object_residuals(fnames_preds, fname_truth, var_name, cut_range=None, norm=F
     # more plot naming stuff
     normed = "norm" if norm else "unnorm"
     plot_dir = "/home/xucabis2/salt/iman/plots"
-    plot_name = f"{plot_dir}/{normed}/residuals_test_{var_name}_{cut_name}_{normed}.png"
+    timestamp = get_timestamp()
+    plot_name = f"{plot_dir}/{normed}/residuals_{var_name}_{cut_name}_{normed}_{timestamp}.png"
 
     # draw and save plot
     plot_histo.draw()
@@ -147,11 +154,13 @@ logs_dir = "/home/xucabis2/salt/logs"
 ckpt_arxiv = "epoch=019-val_loss=0.65962__test_ttbar.h5"
 ckpt_default = "epoch=019-val_loss=0.65355__test_ttbar.h5"
 ckpt_equal = "epoch=019-val_loss=0.64428__test_ttbar.h5"
+ckpt_gls = "epoch=018-val_loss=0.65171__test_ttbar.h5"
 
 fname_arxiv = f"{logs_dir}/MaskFormer_arxiv_20240724-T114414/ckpts/{ckpt_arxiv}"
 fname_default = f"{logs_dir}/MaskFormer_default_20240724-T112538/ckpts/{ckpt_default}"
 fname_equal = f"{logs_dir}/MaskFormer_equal_20240724-T114419/ckpts/{ckpt_equal}"
-fnames_preds = [fname_arxiv, fname_default, fname_equal]
+fname_gls = f"{logs_dir}/MaskFormer_GLS_20240730-T002427/ckpts/{ckpt_gls}"
+fnames_preds = [fname_arxiv, fname_default, fname_equal, fname_gls]
 
 truth_dir = "/home/xzcappon/phd/datasets"
 fname_truth = f"{truth_dir}/vertexing_120m/output/pp_output_test_ttbar.h5"
@@ -165,5 +174,5 @@ cuts = [(0, 0.1), (0.1, 1), (1, 5), (5, np.inf)]
 variables = ["pt", "deta", "dphi", "Lxy", "mass"]
 # variables = ["deta"]
 for variable in variables:
-    # object_residuals(fnames_preds, fname_truth, variable, norm=True)
     object_residuals(fnames_preds, fname_truth, variable, norm=True)
+    object_residuals(fnames_preds, fname_truth, variable, norm=False)

@@ -4,6 +4,7 @@ from salt.models.featurewise import FeaturewiseTransformation
 from salt.models.initnet import InitNet
 from salt.models.inputnorm import InputNorm
 from salt.models.maskformer_loss import MaskFormerLoss
+from salt.models.maskformer_loss_iman import MaskFormerLossIman
 from salt.models.pooling import (
     DictCrossAttentionPooling,
     GlobalAttentionPooling,
@@ -44,6 +45,7 @@ __all__ = [
     "InputNorm",
     "MaskFormer",
     "MaskFormerLoss",
+    "MaskFormerLossIman",
     "MultiheadAttention",
     "NodeQueryGAP",
     "Pooling",
@@ -52,6 +54,7 @@ __all__ = [
     "RegressionTask",
     "RegressionTaskBase",
     "SaltModel",
+    "SaltModelIman",
     "ScaledDotProductAttention",
     "TaskBase",
     "TensorCrossAttentionPooling",
