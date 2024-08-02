@@ -195,7 +195,7 @@ class PredictionWriter(Callback):
             mask_indices = indices_from_mask(objects["masks"].cpu().sigmoid() > 0.5)
             dtype = np.dtype([("MaskIndex", "i8")])
             mask_indices = mask_indices.int().cpu().numpy()
-            mask_indices = np.where(~this_pad_masks.cpu(), mask_indices, -1)
+            mask_indices = np.where(~this_pad_masks, mask_indices, -1)
             # Get the mask index with a default mask cut value of 0.5
             self.outputs["tracks"]["mask_index"].append(
                 u2s(np.expand_dims(mask_indices, -1), dtype)
