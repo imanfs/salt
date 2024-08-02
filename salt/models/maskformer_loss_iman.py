@@ -229,20 +229,6 @@ class MaskFormerLossIman(nn.Module):
 
         return losses
 
-    def weight_loss_GLS(self, losses: dict):
-        # """Apply the loss weights to the loss dict."""
-        # weights = losses / (len(losses) * losses.prod())
-        loss_values = torch.tensor(list(losses.values()))
-        # Calculate the batch weights
-        task_num = len(loss_values)
-        GLS_weights = self.loss_weights
-        weights = loss_values / (task_num * torch.prod(loss_values))
-
-        for i, k in enumerate(list(losses.keys())):
-            GLS_weights[k] = weights[i]
-            losses[k] *= GLS_weights[k]
-        return losses
-
     def forward(self, preds, tasks, labels):
         """Calculate the maskformer loss via optimal assignment."""
         losses = {}
@@ -290,8 +276,6 @@ class MaskFormerLossIman(nn.Module):
         # compute the requested losses
 
         for loss in self.losses:
-            # lozzes.update(self.weight_loss_GLS(self.get_loss(loss, preds, labels)))
             losses.update(self.get_loss(loss, preds, labels))
 
-        # losses.update(self.weight_loss_GLS(losses))
         return preds, labels, losses

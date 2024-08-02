@@ -5,20 +5,33 @@ from sklearn.metrics import mutual_info_score
 from utils import h5py_read
 
 
-# usually considering main to be discrete bc flavour_label
+def load_hdf5_dataset(file_path, dataset_name):
+    with h5py.File(file_path, "r") as f:
+        return f[dataset_name][:]
+
+
+def flavour_class(objects):
+    class_probs = objects["object_class_probs"]
+    class_probs = np.array(class_probs)
+    class_probs_3d = class_probs.view((np.float32, 3))
+
+    # Initialize the new column with zeros
+    flavour = -1 * np.ones(class_probs_3d.shape[:2], dtype=int)
+
+    # Assign values based on conditions
+    flavour[class_probs_3d[:, :, 0] > 0.5] = 5
+    flavour[class_probs_3d[:, :, 1] > 0.5] = 4
+    flavour[class_probs_3d[:, :, 2] > 0.5] = -1
+
+    return flavour
+
+
 def calculate_mutual_information(primary, aux, n_bins=10):
-    # Discretize the continuous data
     # kbd = KBinsDiscretizer(n_bins=n_bins, encode="ordinal", strategy="uniform")
     if not np.issubdtype(aux.dtype, np.integer):
         # aux = kbd.fit_transform(aux.reshape(-1, 1)).ravel()
         aux = np.digitize(aux, bins=np.linspace(np.min(aux), np.max(aux), n_bins))
-    # Calculate mutual information
     return mutual_info_score(primary, aux)
-
-
-def load_hdf5_dataset(file_path, dataset_name):
-    with h5py.File(file_path, "r") as f:
-        return f[dataset_name][:]
 
 
 def calculate_pairwise_mi(primary, aux, n_bins=10):
@@ -29,47 +42,62 @@ def calculate_pairwise_mi(primary, aux, n_bins=10):
     return mi_matrix
 
 
-def plot_mi(primary, aux, n_bins_values):
+def plot_mi_bins(primary, aux, n_bins_values):
     mutual_info_values = []
     for n_bins in n_bins_values:
         mutual_info = calculate_mutual_information(primary, aux, n_bins)
         mutual_info_values.append(mutual_info)
 
-    plt.plot(n_bins_values, mutual_info_values)
+    plt.plot(n_bins_values, mutual_info_values, marker=".")
     plt.xlabel("Number of Bins")
     plt.ylabel("Mutual Information")
     plt.show()
 
 
+def plot_mi_objects(primary, aux_truth, aux_preds, n_objects):
+    n_samples = primary.shape[0]
+
+    def calc_mi_aux(aux):
+        return [
+            calculate_mutual_information(primary, np.nan_to_num(aux[:n_samples, obj]))
+            for obj in range(n_objects)
+        ]
+
+    mutual_info_t = calc_mi_aux(aux_truth)
+    mutual_info_p = calc_mi_aux(aux_preds)
+
+    plt.plot(np.arange(1, n_objects + 1), mutual_info_t, marker=".", label="Truth MI")
+    plt.plot(np.arange(1, n_objects + 1), mutual_info_p, marker=".", label="Prediction MI")
+    plt.title("Mutual Information between jet flavour and truth hadron flavour")
+    plt.xlabel("Truth hadrons (in order of pT)")
+    plt.ylabel("MI")
+    plt.xticks(ticks=[1, 2, 3, 4, 5])
+    plt.legend()
+    plot_dir = "/home/xucabis2/salt/iman/plots/mutual_info"
+    plot_name = f"{plot_dir}/mi.png"
+    print("Saving to ", plot_name)
+    plt.savefig(plot_name, transparent=False)
+
+
 def main():
-    # File paths and dataset names
-    # i think only use the test set here
     fname_truth = "/home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_test_ttbar.h5"
 
+    # usually considering primary task to be discrete bc flavour_label
     primary_data = h5py_read(fname_truth, "jets", var_name="flavour_label")
     primary_data = np.array(primary_data[:10000])
-    # is_light = primary_data == 2
-    # is_c = primary_data == 1
-    # is_b = primary_data == 0
-    aux_label = "pt"
+    # is_light, is_c, is_b = primary_data == 2, primary_data == 1, primary_data == 0
+    # had_is_light, had_is_c, had_is_b = df["flavour"] == 0, df["flavour"] == 4, df["flavour"] == 5
 
-    aux_data = h5py_read(fname_truth, "truth_hadrons", var_name=aux_label)
-    aux_data = np.array(aux_data[:10000, 0])
-    aux_data = np.nan_to_num(aux_data)
+    aux_label = "flavour"
+    aux_truth = h5py_read(fname_truth, "truth_hadrons", var_name=aux_label)
 
-    # had_is_light = df["flavour"] == 0
-    # had_is_c = df["flavour"] == 4
-    # had_is_b = df["flavour"] == 5
-
-    # Calculate pairwise mutual information between columns
-    n_bins = 10_000
-    mutual_info = calculate_mutual_information(primary_data, aux_data, n_bins)
-    # pairwise_mi = calculate_pairwise_mi(primary_data, aux_data, n_bins)
-    print(f"{aux_label} Mutual Information ({n_bins} bins):")
-    print(mutual_info)
-
-    n_bins_values = [10, 100, 1000, 10000]
-    plot_mi(primary_data, aux_data, n_bins_values)
+    fname_default = (
+        "/home/xucabis2/salt/logs/MaskFormer_default_20240724-T112538/"
+        "ckpts/epoch=019-val_loss=0.65355__test_ttbar.h5"
+    )
+    objs = h5py.File(fname_default, "r")["objects"]
+    aux_preds = flavour_class(objs)
+    plot_mi_objects(primary_data, aux_truth, aux_preds, aux_truth.shape[1])
 
 
 if __name__ == "__main__":
