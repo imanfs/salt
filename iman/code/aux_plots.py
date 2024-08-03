@@ -6,19 +6,24 @@ import h5py
 from puma.hlplots import AuxResults, Tagger
 from puma.utils import logger
 
-# The line below generates dummy data which is similar to a NN output
-logs_dir = "/home/xucabis2/salt/logs"
+fname_arxiv = (
+    "/home/xucabis2/salt/logs/MaskFormer_arxiv_20240724-T114414/"
+    "ckpts/epoch=019-val_loss=0.65962__test_ttbar.h5"
+)
+fname_default = (
+    "/home/xucabis2/salt/logs/MaskFormer_default_20240724-T112538/"
+    "ckpts/epoch=019-val_loss=0.65355__test_ttbar.h5"
+)
 
-ckpt_arxiv = "epoch=019-val_loss=0.65962__test_ttbar.h5"
-ckpt_default = "epoch=019-val_loss=0.65355__test_ttbar.h5"
-ckpt_equal = "epoch=019-val_loss=0.64428__test_ttbar.h5"
-ckpt_gls = "epoch=018-val_loss=0.65171__test_ttbar.h5"
+fname_equal = (
+    "/home/xucabis2/salt/logs/MaskFormer_equal_20240724-T114419/ckpts/"
+    "epoch=019-val_loss=0.64428__test_ttbar.h5"
+)
 
-fname_arxiv = f"{logs_dir}/MaskFormer_arxiv_20240724-T114414/ckpts/{ckpt_arxiv}"
-fname_default = f"{logs_dir}/MaskFormer_default_20240724-T112538/ckpts/{ckpt_default}"
-fname_equal = f"{logs_dir}/MaskFormer_equal_20240724-T114419/ckpts/{ckpt_equal}"
-fname_gls = f"{logs_dir}/MaskFormer_GLS_20240730-T002427/ckpts/{ckpt_gls}"
-fnames_preds = [fname_arxiv, fname_default, fname_equal, fname_gls]
+fname_gls = (
+    "/home/xucabis2/salt/logs/MaskFormer_GLS_20240730-T002427/ckpts/"
+    "epoch=018-val_loss=0.65171__test_ttbar.h5"
+)
 
 file = h5py.File(fname_gls)
 # define jet selections
