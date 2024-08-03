@@ -1,4 +1,4 @@
-name: MaskFormer_equal
+name: MaskFormer_1.3m_default
 
 model:
   lrs_config:
@@ -22,7 +22,7 @@ model:
         class_path: salt.models.TransformerV2
         init_args:
           embed_dim: *embed_dim
-          num_layers: 4
+          num_layers: 3
           out_dim: *embed_dim
           attn_kwargs:
             num_heads: 8
@@ -32,11 +32,11 @@ model:
 
 
       mask_decoder:
-        class_path: salt.models.maskformer_iman.MaskDecoderIman
+        class_path: salt.models.maskformer.MaskDecoder
         init_args:
           num_objects: 5
           embed_dim: *embed_dim
-          num_layers: 3
+          num_layers: 2
           aux_loss: false
           md_config:
             mask_attention: true
@@ -58,12 +58,6 @@ model:
           loss_config:
             num_classes: 2
             loss_weights:
-              object_class_ce: 1.0
-              mask_ce: 1.0
-              mask_dice: 1.0
-              regression: 1.0
-
-            matcher_weights:
               object_class_ce: 2.0
               mask_ce: 10.0
               mask_dice: 2.0
@@ -144,9 +138,9 @@ model:
                   context_size: *embed_dim
 
 data:
-  num_train: 20_000_000
+  num_train: 30_000_000
   num_val: 1_000_000
-  num_test: 500_000
+
   variables:
     jets:
       - pt_btagJes
@@ -199,23 +193,20 @@ data:
   class_dict: /home/xzcappon/phd/datasets/vertexing_120m/output/class_dict.yaml
   #move_files_temp: /dev/shm/svanstro/salt/gn2/
 
-  batch_size: 12000
-  num_workers: 16
+  batch_size: 8000 # 12000
+  num_workers: 10
 
 trainer:
   max_epochs: 20
   accelerator: gpu
   devices: 1
   precision: 16-mixed
-  default_root_dir: logs
+  default_root_dir: ~/salt/logs
   callbacks:
     - class_path: salt.callbacks.Checkpoint
       init_args:
         monitor_loss: val_jets_classification_loss
     - class_path: salt.callbacks.PredictionWriter
-      init_args:
-        write_tracks: True
-        write_objects: True
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
     - class_path: lightning.pytorch.callbacks.TQDMProgressBar
       init_args: { refresh_rate: 50 }

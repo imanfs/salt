@@ -27,10 +27,10 @@ def disc_fct(arr: np.ndarray, f_c: float = 0.018) -> np.ndarray:
     return np.log(arr[2] / (f_c * arr[1] + (1 - f_c) * arr[0]))
 
 
-logs_dir = "/home/xucabis2/salt/logs"
-
-ckpt_default = "epoch=019-val_loss=0.65355__test_ttbar.h5"
-fname_default = f"{logs_dir}/MaskFormer_default_20240724-T112538/ckpts/{ckpt_default}"
+fname_default = (
+    "/home/xucabis2/salt/logs/MaskFormer_default_20240724-T112538/"
+    "ckpts/epoch=019-val_loss=0.65355__test_ttbar.h5"
+)
 
 reader = H5Reader(fname_default, batch_size=1_000)
 df = pd.DataFrame(
@@ -52,8 +52,11 @@ df = pd.DataFrame(
     )["jets"]
 )
 
-ckpt_comp = "epoch=018-val_loss=0.65171__test_ttbar.h5"
-fname_comp = f"{logs_dir}/MaskFormer_GLS_20240730-T002427/ckpts/{ckpt_comp}"
+fname_comp = (
+    "/home/xucabis2/salt/logs/MaskFormer_GLS_20240730-T002427/"
+    "ckpts/epoch=018-val_loss=0.65171__test_ttbar.h5"
+)
+
 h5file = h5py.File(fname_comp, "r")
 comp_name = extract_MF_name(fname_comp)
 
@@ -74,8 +77,11 @@ df_comp = pd.DataFrame(
     )["jets"]
 )
 
-ckpt_rlw = "epoch=019-val_loss=0.64431__test_ttbar.h5"
-fname_rlw = f"{logs_dir}/MaskFormer_RLW_20240731-T012016/ckpts/{ckpt_rlw}"
+fname_rlw = (
+    "/home/xucabis2/salt/logs/MaskFormer_RLW_20240731-T012016/"
+    "ckpts/epoch=019-val_loss=0.64431__test_ttbar.h5"
+)
+
 h5file = h5py.File(fname_rlw, "r")
 rlw_name = extract_MF_name(fname_rlw)
 
