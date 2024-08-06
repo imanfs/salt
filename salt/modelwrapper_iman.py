@@ -93,6 +93,37 @@ class ModelWrapperIman(L.LightningModule):
 
         # weighting params
         self.weighting = self.model.mask_decoder.mask_loss.weighting
+        self.epoch_losses = {}  # type: dict[str, list[float]]
+        self.batch_sizes = []  # type: list[int]
+        self.avg_losses = {}  # type: dict[str, torch.Tensor]
+
+    def on_fit_start(self):
+        self.model.mask_decoder.mask_loss.max_epochs = self.trainer.max_epochs
+        self.model.mask_decoder.mask_loss.train_loss_buffer = torch.zeros([
+            6,
+            self.trainer.max_epochs,
+        ])
+
+    def on_train_epoch_start(self):
+        # Reset the list of losses and batch sizes at the start of each epoch
+        self.epoch_losses = {}
+        self.batch_sizes = []
+        self.model.mask_decoder.mask_loss.current_epoch = self.current_epoch
+
+    def on_train_epoch_end(self):
+        # Calculate average loss for each task for the epoch
+
+        for task_name, losses in self.epoch_losses.items():
+            if self.avg_losses.get(task_name) is None:
+                self.avg_losses[task_name] = torch.zeros(self.trainer.max_epochs)
+
+            self.avg_losses[task_name][self.current_epoch] = sum(losses) / len(losses)
+
+        self.model.mask_decoder.mask_loss.avg_losses = self.avg_losses
+        for task_idx, task_name in enumerate(self.epoch_losses.keys()):
+            self.model.mask_decoder.mask_loss.train_loss_buffer[task_idx, self.current_epoch] = (
+                self.avg_losses[task_name][self.current_epoch]
+            )
 
     def forward(self, inputs, pad_masks=None, labels=None):
         """Generic forward pass through any salt-compatible model.
@@ -114,7 +145,6 @@ class ModelWrapperIman(L.LightningModule):
         -------
         Whatever is returned by `self.model`'s forward pass.
         """
-        # print(self.weighting)
         x = self.norm(inputs)
         return self.model(x, pad_masks, labels)
 
@@ -147,9 +177,20 @@ class ModelWrapperIman(L.LightningModule):
         if evaluation:
             return preds, labels, pad_masks, None
 
+        if self.weighting == "DWA":
+            for task_name, loss_item in loss.items():
+                if task_name not in self.epoch_losses:
+                    self.epoch_losses[task_name] = []
+                self.epoch_losses[task_name].append(loss_item.detach())
+
+            # # Store batch size
+            # self.batch_sizes.append(
+            #     batch[0].size(0)
+            # )  # Assuming the first element of batch is the input tensor
+
         task_num = len(loss)
 
-        # compute total loss
+        ######## COMPUTE TOTAL LOSS ########  # noqa: E266
         if self.weighting in {"static", "RLW", "DWA"}:
             loss["loss"] = sum(subloss for subloss in loss.values())
 
