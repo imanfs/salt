@@ -22,3 +22,9 @@ def h5py_read(h5path, key, dataset=None, var_name=None):
             data = {name: h5[key][dataset][name] for name in h5[key][dataset].dtype.names}
 
     return data
+
+
+def extract_MF_name(path):
+    prefix = "MaskFormer_"
+    suffix = "_"
+    return path.partition(prefix)[2].partition(suffix)[0]

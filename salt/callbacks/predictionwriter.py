@@ -7,6 +7,7 @@ from ftag import Flavours as Flavs
 from lightning import Callback, LightningModule, Trainer
 from numpy.lib.recfunctions import unstructured_to_structured as u2s
 
+from salt.models.maskformer import get_maskformer_outputs
 from salt.models.task import (
     ClassificationTask,
     GaussianRegressionTask,
@@ -177,7 +178,8 @@ class PredictionWriter(Callback):
 
         if self.write_objects:
             objects = outputs["objects"]
-
+            this_pad_masks = pad_masks.get(task.input_name)
+            _, indices, _, _ = get_maskformer_outputs(outputs["objects"], apply_reorder=False)
             for out in ["object_class_probs", "object_class_targets", "mask_logits", "tgt_masks"]:
                 if out not in self.outputs["objects"]:
                     self.outputs["objects"][out] = []
@@ -193,9 +195,9 @@ class PredictionWriter(Callback):
             )
             self.outputs["objects"]["mask_logits"].append(objects["masks"].cpu().float().numpy())
             mask_indices = indices_from_mask(objects["masks"].cpu().sigmoid() > 0.5)
-            dtype = np.dtype([("MaskIndex", "i8")])
-            mask_indices = mask_indices.int().cpu().numpy()
-            mask_indices = np.where(~this_pad_masks.cpu(), mask_indices, -1)
+            dtype = np.dtype([("MaskFormer_VertexIndex", "i8")])
+            # mask_indices = mask_indices.int().cpu().numpy()
+            indices = np.where(~this_pad_masks.cpu().numpy(), indices.cpu().numpy(), -1)
             # Get the mask index with a default mask cut value of 0.5
             self.outputs["tracks"]["mask_index"].append(
                 u2s(np.expand_dims(mask_indices, -1), dtype)

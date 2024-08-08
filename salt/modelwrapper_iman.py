@@ -3,6 +3,7 @@ from collections.abc import Mapping
 
 import lightning as L
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from salt.models import InputNorm
@@ -125,6 +126,38 @@ class ModelWrapperIman(L.LightningModule):
                 self.avg_losses[task_name][self.current_epoch]
             )
 
+    def weight_loss(self, losses: dict):
+        # """Apply the loss weights to the loss dict."""
+        loss_values = torch.tensor(list(losses.values()))
+        # number of tasks
+        task_num = len(loss_values)
+
+        if self.weighting == "static":
+            for k in list(losses.keys()):
+                losses[k] *= self.loss_weights[k]
+
+        elif self.weighting == "RLW":
+            weights = F.softmax(torch.randn(task_num), dim=-1)
+            # Apply weights to each loss
+            for i, k in enumerate(list(losses.keys())):
+                losses[k] *= weights[i]
+
+        elif self.weighting == "DWA":
+            # T = loss_config['T']
+            T = 2.0
+            if self.current_epoch > 1:
+                w_i = torch.Tensor(
+                    self.train_loss_buffer[:, self.current_epoch - 1]
+                    / self.train_loss_buffer[:, self.current_epoch - 2]
+                )
+                weights = 6 * F.softmax(w_i / T, dim=-1)
+
+            else:
+                weights = torch.ones(task_num)
+            for i, k in enumerate(list(losses.keys())):
+                losses[k] *= weights[i]
+        return losses
+
     def forward(self, inputs, pad_masks=None, labels=None):
         """Generic forward pass through any salt-compatible model.
 
@@ -182,11 +215,6 @@ class ModelWrapperIman(L.LightningModule):
                 if task_name not in self.epoch_losses:
                     self.epoch_losses[task_name] = []
                 self.epoch_losses[task_name].append(loss_item.detach())
-
-            # # Store batch size
-            # self.batch_sizes.append(
-            #     batch[0].size(0)
-            # )  # Assuming the first element of batch is the input tensor
 
         task_num = len(loss)
 
