@@ -160,7 +160,12 @@ fname_gls = (
     "epoch=018-val_loss=0.65171__test_ttbar.h5"
 )
 
-fnames_preds = [fname_default, fname_equal, fname_gls]
+fname_dwa = (
+    "/home/xucabis2/salt/logs/MaskFormer_DWA_20240806-T121649/"
+    "ckpts/epoch=019-val_loss=0.64425__test_ttbar.h5"
+)
+
+fnames_preds = [fname_default, fname_gls, fname_dwa]
 
 fname_truth = "/home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_test_ttbar.h5"
 

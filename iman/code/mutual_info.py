@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,7 +18,7 @@ def flavour_class(objects):
     class_probs_3d = class_probs.view((np.float32, 3))
 
     # Initialize the new column with zeros
-    flavour = -1 * np.ones(class_probs_3d.shape[:2], dtype=int)
+    flavour = 0 * np.ones(class_probs_3d.shape[:2], dtype=int)
 
     # Assign values based on conditions
     flavour[class_probs_3d[:, :, 0] > 0.5] = 5
@@ -54,7 +56,7 @@ def plot_mi_bins(primary, aux, n_bins_values):
     plt.show()
 
 
-def plot_mi_objects(primary, aux_truth, aux_preds, n_objects):
+def plot_mi_objects(primary, aux_truth, aux_preds1, aux_preds2, n_objects=5):
     n_samples = primary.shape[0]
 
     def calc_mi_aux(aux):
@@ -64,17 +66,20 @@ def plot_mi_objects(primary, aux_truth, aux_preds, n_objects):
         ]
 
     mutual_info_t = calc_mi_aux(aux_truth)
-    mutual_info_p = calc_mi_aux(aux_preds)
+    mutual_info_p1 = calc_mi_aux(aux_preds1)
+    mutual_info_p2 = calc_mi_aux(aux_preds2)
+    timestamp = datetime.now().strftime("%m%d")
 
-    plt.plot(np.arange(1, n_objects + 1), mutual_info_t, marker=".", label="Truth MI")
-    plt.plot(np.arange(1, n_objects + 1), mutual_info_p, marker=".", label="Prediction MI")
+    plt.plot(np.arange(1, n_objects + 1), mutual_info_t, marker=".", label="Truth")
+    plt.plot(np.arange(1, n_objects + 1), mutual_info_p1, marker=".", label="Default weighting")
+    plt.plot(np.arange(1, n_objects + 1), mutual_info_p2, marker=".", label="GLS")
     plt.title("Mutual Information between jet flavour and truth hadron flavour")
     plt.xlabel("Truth hadrons (in order of pT)")
     plt.ylabel("MI")
     plt.xticks(ticks=[1, 2, 3, 4, 5])
     plt.legend()
     plot_dir = "/home/xucabis2/salt/iman/plots/mutual_info"
-    plot_name = f"{plot_dir}/mi.png"
+    plot_name = f"{plot_dir}/mi_GLS_{timestamp}.png"
     print("Saving to ", plot_name)
     plt.savefig(plot_name, transparent=False)
 
@@ -84,7 +89,7 @@ def main():
 
     # usually considering primary task to be discrete bc flavour_label
     primary_data = h5py_read(fname_truth, "jets", var_name="flavour_label")
-    primary_data = np.array(primary_data[:10000])
+    primary_data = np.array(primary_data[:30000])
     # is_light, is_c, is_b = primary_data == 2, primary_data == 1, primary_data == 0
     # had_is_light, had_is_c, had_is_b = df["flavour"] == 0, df["flavour"] == 4, df["flavour"] == 5
 
@@ -95,9 +100,16 @@ def main():
         "/home/xucabis2/salt/logs/MaskFormer_default_20240724-T112538/"
         "ckpts/epoch=019-val_loss=0.65355__test_ttbar.h5"
     )
+    fname_gls = (
+        "/home/xucabis2/salt/logs/MaskFormer_GLS_20240730-T002427/ckpts/"
+        "epoch=018-val_loss=0.65171__test_ttbar.h5"
+    )
     objs = h5py.File(fname_default, "r")["objects"]
-    aux_preds = flavour_class(objs)
-    plot_mi_objects(primary_data, aux_truth, aux_preds, aux_truth.shape[1])
+    def_preds = flavour_class(objs)
+
+    objs = h5py.File(fname_gls, "r")["objects"]
+    gls_preds = flavour_class(objs)
+    plot_mi_objects(primary_data, aux_truth, def_preds, gls_preds, aux_truth.shape[1])
 
 
 if __name__ == "__main__":
