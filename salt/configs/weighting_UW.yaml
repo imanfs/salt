@@ -1,0 +1,7 @@
+model:
+  model:
+    init_args:
+      mask_decoder:
+        init_args:
+          loss_config:
+            weighting: UW

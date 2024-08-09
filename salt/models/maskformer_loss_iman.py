@@ -157,11 +157,6 @@ class MaskFormerLossIman(nn.Module):
             num_objects=num_objects,
             loss_weights=matcher_weights,
         )
-        self.current_epoch = 0
-        # np.zeros([self.task_num, epochs])
-        self.max_epochs = 0
-        self.train_loss_buffer = torch.zeros([4, self.max_epochs])
-        self.avg_losses = {}  # type: dict
 
     def loss_labels(self, preds, labels):
         """Classification loss (NLL)
@@ -220,61 +215,6 @@ class MaskFormerLossIman(nn.Module):
         return self.weight_loss(loss_map[loss](preds["objects"], labels["objects"]))
 
     def weight_loss(self, losses: dict):
-        # """Apply the loss weights to the loss dict."""
-        # print(self.max_epochs)
-        loss_values = torch.tensor(list(losses.values()))
-        # number of tasks
-        task_num = len(loss_values)
-        # loss_scale = nn.Parameter(torch.tensor([-0.5] * task_num))
-
-        if self.weighting == "static":
-            for k in list(losses.keys()):
-                losses[k] *= self.loss_weights[k]
-
-        elif self.weighting == "GLS":
-            pass
-            # GLS_weights = loss_values / (task_num * torch.prod(loss_values))
-            # # turn into dict if necessary
-            # for i, k in enumerate(list(losses.keys())):
-            #     GLS_weights[k] = weights[i]
-            #     # losses[k] *= GLS_weights[k] DON'T RUN THIS -- GLS LOSS NOT WEIGHTED HERE
-
-        elif self.weighting == "RLW":
-            weights = F.softmax(torch.randn(task_num), dim=-1)
-            # Apply weights to each loss
-            for i, k in enumerate(list(losses.keys())):
-                losses[k] *= weights[i]
-
-        elif self.weighting == "DWA":
-            # T = loss_config['T']
-            T = 2.0
-            if self.current_epoch > 1:
-                w_i = torch.Tensor(
-                    self.train_loss_buffer[:, self.current_epoch - 1]
-                    / self.train_loss_buffer[:, self.current_epoch - 2]
-                )
-                weights = 6 * F.softmax(w_i / T, dim=-1)
-
-                # L_tm1 = {
-                #     key: value[self.current_epoch - 1] for key, value in self.avg_losses.items()
-                # }
-                # L_tm2 = {
-                #     key: value[self.current_epoch - 2] for key, value in self.avg_losses.items()
-                # }
-                # w_i_dict = {key: L_tm1[key] / L_tm2[key] for key in L_tm1}
-                # w_i_tensor = torch.tensor(list(w_i_dict.values()))
-                # weights_tensor = 6 * F.softmax(w_i_tensor / T, dim=0)
-                # weights_dict = {
-                #     key: weight.item()
-                #     for key, weight in zip(w_i_dict.keys(), weights_tensor, strict=False)
-                # }
-                # print("weights: ", weights)
-                # print("weights_dict", weights_dict)
-
-            else:
-                weights = torch.ones(task_num)
-            for i, k in enumerate(list(losses.keys())):
-                losses[k] *= weights[i]
         return losses
 
     def forward(self, preds, tasks, labels):

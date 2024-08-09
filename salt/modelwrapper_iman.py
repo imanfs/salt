@@ -94,56 +94,48 @@ class ModelWrapperIman(L.LightningModule):
 
         # weighting params
         self.weighting = self.model.mask_decoder.mask_loss.weighting
-        self.epoch_losses = {}  # type: dict[str, list[float]]
-        self.batch_sizes = []  # type: list[int]
+        self.loss_weights = self.model.mask_decoder.mask_loss.loss_weights
+
+        self.task_num = len(self.loss_weights)
         self.avg_losses = {}  # type: dict[str, torch.Tensor]
+        self.batch_losses = {}  # type: dict[str, list[float]]
 
     def on_fit_start(self):
-        self.model.mask_decoder.mask_loss.max_epochs = self.trainer.max_epochs
-        self.model.mask_decoder.mask_loss.train_loss_buffer = torch.zeros([
-            6,
-            self.trainer.max_epochs,
-        ])
+        self.train_loss_buffer = torch.zeros([6, self.trainer.max_epochs])
+        self.loss_scale = nn.Parameter(torch.tensor([-0.5] * self.task_num))
+        print("self.loss_weights", self.loss_weights, self.weighting)
 
     def on_train_epoch_start(self):
         # Reset the list of losses and batch sizes at the start of each epoch
-        self.epoch_losses = {}
-        self.batch_sizes = []
-        self.model.mask_decoder.mask_loss.current_epoch = self.current_epoch
+        self.batch_losses = {}
+        print("self.batch_losses", self.batch_losses)
 
     def on_train_epoch_end(self):
         # Calculate average loss for each task for the epoch
-
-        for task_name, losses in self.epoch_losses.items():
+        for task_name, losses in self.batch_losses.items():
             if self.avg_losses.get(task_name) is None:
                 self.avg_losses[task_name] = torch.zeros(self.trainer.max_epochs)
 
             self.avg_losses[task_name][self.current_epoch] = sum(losses) / len(losses)
-
-        self.model.mask_decoder.mask_loss.avg_losses = self.avg_losses
-        for task_idx, task_name in enumerate(self.epoch_losses.keys()):
-            self.model.mask_decoder.mask_loss.train_loss_buffer[task_idx, self.current_epoch] = (
-                self.avg_losses[task_name][self.current_epoch]
-            )
+        for task_idx, task_name in enumerate(self.batch_losses.keys()):
+            self.train_loss_buffer[task_idx, self.current_epoch] = self.avg_losses[task_name][
+                self.current_epoch
+            ]
 
     def weight_loss(self, losses: dict):
         # """Apply the loss weights to the loss dict."""
-        loss_values = torch.tensor(list(losses.values()))
-        # number of tasks
-        task_num = len(loss_values)
 
         if self.weighting == "static":
             for k in list(losses.keys()):
                 losses[k] *= self.loss_weights[k]
 
         elif self.weighting == "RLW":
-            weights = F.softmax(torch.randn(task_num), dim=-1)
+            weights = F.softmax(torch.randn(self.task_num), dim=-1)
             # Apply weights to each loss
             for i, k in enumerate(list(losses.keys())):
                 losses[k] *= weights[i]
 
         elif self.weighting == "DWA":
-            # T = loss_config['T']
             T = 2.0
             if self.current_epoch > 1:
                 w_i = torch.Tensor(
@@ -153,9 +145,12 @@ class ModelWrapperIman(L.LightningModule):
                 weights = 6 * F.softmax(w_i / T, dim=-1)
 
             else:
-                weights = torch.ones(task_num)
+                weights = torch.ones(self.task_num)
             for i, k in enumerate(list(losses.keys())):
                 losses[k] *= weights[i]
+
+        elif self.weighting == "UW":
+            losses = losses / (2 * self.loss_scale.exp()) + self.loss_scale / 2
         return losses
 
     def forward(self, inputs, pad_masks=None, labels=None):
@@ -210,16 +205,19 @@ class ModelWrapperIman(L.LightningModule):
         if evaluation:
             return preds, labels, pad_masks, None
 
+        # calculate batch losses
         if self.weighting == "DWA":
             for task_name, loss_item in loss.items():
-                if task_name not in self.epoch_losses:
-                    self.epoch_losses[task_name] = []
-                self.epoch_losses[task_name].append(loss_item.detach())
+                if task_name not in self.batch_losses:
+                    self.batch_losses[task_name] = []
+                self.batch_losses[task_name].append(loss_item.detach())
 
-        task_num = len(loss)
+        # weight the losses
+        loss = self.weight_loss(loss)
 
         ######## COMPUTE TOTAL LOSS ########  # noqa: E266
-        if self.weighting in {"static", "RLW", "DWA"}:
+        # combine the task losses
+        if self.weighting in {"static", "RLW", "DWA", "UW"}:
             loss["loss"] = sum(subloss for subloss in loss.values())
 
         elif self.weighting == "GLS":
@@ -228,7 +226,7 @@ class ModelWrapperIman(L.LightningModule):
             for subloss in loss.values():
                 loss_prod *= subloss
             # Calculate the geometric mean
-            geometric_mean_loss = torch.pow(loss_prod, 1.0 / task_num)
+            geometric_mean_loss = torch.pow(loss_prod, 1.0 / self.task_num)
             loss["loss"] = geometric_mean_loss
 
         return preds, labels, pad_masks, loss

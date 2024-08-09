@@ -154,7 +154,7 @@ class ClassificationTask(TaskBase):
             else:
                 loss = self.loss(preds, labels)
             loss = self.apply_sample_weight(loss, labels_dict)
-            loss *= self.weight
+            # loss *= self.weight
 
         return preds, loss
 
@@ -330,7 +330,7 @@ class RegressionTask(RegressionTaskBase):
 
         loss = None
         if targets is not None:
-            loss = self.nan_loss(preds, targets) * self.weight
+            loss = self.nan_loss(preds, targets)  # * self.weight
 
         return preds, loss
 
@@ -391,7 +391,7 @@ class GaussianRegressionTask(RegressionTaskBase):
 
         loss = None
         if targets is not None:
-            loss = self.nan_loss(means, targets, var=variances) * self.weight
+            loss = self.nan_loss(means, targets, var=variances)  # * self.weight
 
         return preds, loss
 
@@ -503,9 +503,9 @@ class VertexingTask(TaskBase):
         num_non_masked_elements = match_matrix.sum()
 
         # Take average over the non-masked elements
-        loss = weighted_loss.sum() / num_non_masked_elements
-
-        return loss * self.weight
+        # loss = weighted_loss.sum() / num_non_masked_elements
+        # return loss * self.weight
+        return weighted_loss.sum() / num_non_masked_elements
 
     def get_weights(self, labels, adjmat):
         weights = torch.clip(sum(labels == i for i in (3, 4, 5)), 0, 1) - (labels == 1).int()

@@ -1,4 +1,4 @@
-name: MaskFormer_DWA
+name: MaskFormer
 
 model:
   lrs_config:
@@ -56,13 +56,15 @@ model:
               output_size: *embed_dim
 
           loss_config:
-            weighting: DWA
+            weighting: static
             num_classes: 2
             loss_weights:
-              object_class_ce: 1.0
-              mask_ce: 1.0
-              mask_dice: 1.0
-              regression: 1.0
+              object_class_ce: 2.0
+              mask_ce: 10.0
+              mask_dice: 2.0
+              regression: 0.5
+              jets_classification: 1.0
+              track_origin: 0.5
 
             matcher_weights:
               object_class_ce: 2.0
@@ -145,8 +147,8 @@ model:
                   context_size: *embed_dim
 
 data:
-  num_train: 20_000_000
-  num_val: 1_000_000
+  num_train: 5_000
+  num_val: 1_000
   num_test: 500_000
   variables:
     jets:
@@ -200,11 +202,11 @@ data:
   class_dict: /home/xzcappon/phd/datasets/vertexing_120m/output/class_dict.yaml
   #move_files_temp: /dev/shm/svanstro/salt/gn2/
 
-  batch_size: 12000
-  num_workers: 16
+  batch_size: 50
+  num_workers: 10
 
 trainer:
-  max_epochs: 20
+  max_epochs: 4
   accelerator: gpu
   devices: 1
   precision: 16-mixed
