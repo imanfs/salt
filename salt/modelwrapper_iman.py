@@ -95,11 +95,16 @@ class ModelWrapperIman(L.LightningModule):
         # weighting params
         self.weighting = self.model.mask_decoder.mask_loss.weighting
         self.loss_weights = self.model.mask_decoder.mask_loss.loss_weights
-
         self.task_num = len(self.loss_weights)
+        self.task_name = list(self.loss_weights.keys())
+
         self.avg_losses = {}  # type: dict[str, torch.Tensor]
         self.batch_losses = {}  # type: dict[str, list[float]]
-        self.loss_scale = nn.Parameter(torch.tensor([-0.5] * self.task_num))
+
+        self.rep_grad = True
+        if self.rep_grad:
+            self.rep_tasks = {}  # type: dict[str, torch.Tensor]
+            self.rep = {}  # type: dict[str, torch.Tensor]
 
     def on_fit_start(self):
         self.train_loss_buffer = torch.zeros([6, self.trainer.max_epochs])
