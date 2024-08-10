@@ -1,4 +1,4 @@
-name: MaskFormer
+name: MaskFormer_default
 
 model:
   lrs_config:
@@ -147,8 +147,8 @@ model:
                   context_size: *embed_dim
 
 data:
-  num_train: 5_000
-  num_val: 1_000
+  num_train: 20_000_000
+  num_val: 1_000_000
   num_test: 500_000
   variables:
     jets:
@@ -202,11 +202,11 @@ data:
   class_dict: /home/xzcappon/phd/datasets/vertexing_120m/output/class_dict.yaml
   #move_files_temp: /dev/shm/svanstro/salt/gn2/
 
-  batch_size: 50
+  batch_size: 12000
   num_workers: 10
 
 trainer:
-  max_epochs: 4
+  max_epochs: 20
   accelerator: gpu
   devices: 1
   precision: 16-mixed

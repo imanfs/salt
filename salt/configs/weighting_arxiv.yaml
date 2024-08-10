@@ -1,3 +1,5 @@
+name: MaskFormer_arxiv
+
 model:
   model:
     init_args:

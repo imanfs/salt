@@ -1,3 +1,5 @@
+name: MaskFormer_equal
+
 model:
   model:
     init_args:

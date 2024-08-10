@@ -99,16 +99,15 @@ class ModelWrapperIman(L.LightningModule):
         self.task_num = len(self.loss_weights)
         self.avg_losses = {}  # type: dict[str, torch.Tensor]
         self.batch_losses = {}  # type: dict[str, list[float]]
+        self.loss_scale = nn.Parameter(torch.tensor([-0.5] * self.task_num))
 
     def on_fit_start(self):
         self.train_loss_buffer = torch.zeros([6, self.trainer.max_epochs])
-        self.loss_scale = nn.Parameter(torch.tensor([-0.5] * self.task_num))
-        print("self.loss_weights", self.loss_weights, self.weighting)
 
     def on_train_epoch_start(self):
         # Reset the list of losses and batch sizes at the start of each epoch
         self.batch_losses = {}
-        print("self.batch_losses", self.batch_losses)
+        print(self.loss_scale)
 
     def on_train_epoch_end(self):
         # Calculate average loss for each task for the epoch
@@ -142,7 +141,7 @@ class ModelWrapperIman(L.LightningModule):
                     self.train_loss_buffer[:, self.current_epoch - 1]
                     / self.train_loss_buffer[:, self.current_epoch - 2]
                 )
-                weights = 6 * F.softmax(w_i / T, dim=-1)
+                weights = self.task_num * F.softmax(w_i / T, dim=-1)
 
             else:
                 weights = torch.ones(self.task_num)
@@ -150,7 +149,11 @@ class ModelWrapperIman(L.LightningModule):
                 losses[k] *= weights[i]
 
         elif self.weighting == "UW":
-            losses = losses / (2 * self.loss_scale.exp()) + self.loss_scale / 2
+            weighted_losses = {
+                key: value / (2 * self.loss_scale[i].exp()) + self.loss_scale[i] / 2
+                for i, (key, value) in enumerate(losses.items())
+            }
+            losses = weighted_losses
         return losses
 
     def forward(self, inputs, pad_masks=None, labels=None):
