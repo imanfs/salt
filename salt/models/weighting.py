@@ -4,13 +4,11 @@ import torch
 class Weighting:
     def __init__(self, rep_grad=False):
         self.rep_grad = rep_grad
-        self.grad_dim = 0
-        self.grad_index = []
 
     def init_param(self):
         r"""Define and initialize trainable parameters required by specific weighting methods."""
         if self.weighting == "UW":
-            self.weight = torch.nn.Parameter([-0.5] * self.task_num)
+            self.loss_scale = torch.nn.Parameter(torch.tensor([-0.5] * self.task_num))
         elif self.weighting == "DB_MTL":
             self.step = 0
             self._compute_grad_dim()
@@ -120,6 +118,14 @@ class Weighting:
             # new_grads = torch.einsum('i, i... -> ...', batch_weight, grads)
             new_grads = sum([batch_weight[i] * grads[i] for i in range(self.task_num)])
             self._reset_grad(new_grads)
+
+    def get_share_params(self):
+        """Return the shared parameters of the model."""
+        return self.model.parameters()
+
+    def zero_grad_share_params(self):
+        """Set gradients of the shared parameters to zero."""
+        self.model.zero_grad(set_to_none=False)
 
     # @property
     # def backward(self, losses, **kwargs):
