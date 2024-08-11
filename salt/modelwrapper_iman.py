@@ -156,6 +156,21 @@ class ModelWrapperIman(L.LightningModule):
             losses = weighted_losses
         return losses
 
+    def total_loss(self, loss: dict):
+        # combine the task losses
+        if self.weighting in {"static", "RLW", "DWA", "UW"}:
+            loss["loss"] = sum(subloss for subloss in loss.values())
+
+        elif self.weighting == "GLS":
+            # Calculate the geometric mean of the losses
+            loss_prod = 1.0
+            for subloss in loss.values():
+                loss_prod *= subloss
+            # Calculate the geometric mean
+            geometric_mean_loss = torch.pow(loss_prod, 1.0 / self.task_num)
+            loss["loss"] = geometric_mean_loss
+        return loss
+
     def forward(self, inputs, pad_masks=None, labels=None):
         """Generic forward pass through any salt-compatible model.
 
@@ -215,23 +230,6 @@ class ModelWrapperIman(L.LightningModule):
                     self.batch_losses[task_name] = []
                 self.batch_losses[task_name].append(loss_item.detach())
 
-        # weight the losses
-        loss = self.weight_loss(loss)
-
-        ######## COMPUTE TOTAL LOSS ########  # noqa: E266
-        # combine the task losses
-        if self.weighting in {"static", "RLW", "DWA", "UW"}:
-            loss["loss"] = sum(subloss for subloss in loss.values())
-
-        elif self.weighting == "GLS":
-            # Calculate the geometric mean of the losses
-            loss_prod = 1.0
-            for subloss in loss.values():
-                loss_prod *= subloss
-            # Calculate the geometric mean
-            geometric_mean_loss = torch.pow(loss_prod, 1.0 / self.task_num)
-            loss["loss"] = geometric_mean_loss
-
         return preds, labels, pad_masks, loss
 
     def log_losses(self, loss, stage):
@@ -242,17 +240,22 @@ class ModelWrapperIman(L.LightningModule):
             self.log(n, loss_value, **kwargs)
 
     def training_step(self, batch):
-        # foward pass
+        # forward pass
         preds, labels, pad_masks, loss = self.shared_step(batch)
 
+        # log raw losses
+        log_loss = loss.copy()
+        log_loss = self.total_loss(log_loss)
+        self.log_losses(log_loss, stage="train")
+
+        # weight and combine losses
+        loss = self.total_loss(self.weight_loss(loss))
         if loss["loss"].isnan():
             raise RuntimeError(
                 "Loss is NaN - this indicates something significant has gone wrong."
                 "Check for any NaNs or infs in the input dataset. If nothing is found here, "
                 "check 'docs/training.md - NaNs' for more information"
             )
-        # log losses
-        self.log_losses(loss, stage="train")
 
         outputs = {
             "preds": preds,
@@ -266,8 +269,13 @@ class ModelWrapperIman(L.LightningModule):
         # foward pass
         preds, labels, pad_masks, loss = self.shared_step(batch)
 
-        # log losses
-        self.log_losses(loss, stage="val")
+        # log raw losses
+        log_loss = loss.copy()
+        log_loss = self.total_loss(log_loss)
+        self.log_losses(log_loss, stage="val")
+
+        # weight and combine losses
+        loss = self.total_loss(self.weight_loss(loss))
 
         # Store outputs to be used by the MaskformerMetrics callback
         outputs = {

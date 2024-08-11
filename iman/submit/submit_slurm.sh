@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Job name
-#SBATCH --job-name=salt
+#SBATCH --job-name=weights
 
 # choose the GPU queue
-#SBATCH -p GPU
+#SBATCH -p LIGHTGPU
 
 # requesting one node
 #SBATCH --nodes=1
@@ -22,25 +22,25 @@
 
 # number of cpus per task
 # don't use this if you have exclusive access to the node
-# SBATCH --cpus-per-task=16
+# SBATCH --cpus-per-task=10
 
 # request enough memory
-#SBATCH --mem=50G
+#SBATCH --mem=40G
 
 # Change log names; %j gives job id, %x gives job name
-#SBATCH --output=/home/xucabis2/salt/salt/submit/logs/slurm-%j.%x.out
+# SBATCH --output=/home/xucabis2/salt/salt/submit/logs/slurm-%j.%x.out
 # optional separate error output file
 # #SBATCH --error=/home/xucabis2/salt/salt/submit/logs/slurm-%j.%x.err
 
 # speedup (not sure if this does anything)
-export OMP_NUM_THREADS=1
-export CUDA_VISIBLE_DEVICES=0
+# export OMP_NUM_THREADS=1
+# export CUDA_VISIBLE_DEVICES=0
 node=$(hostname)
 echo "Running on " $node
 
 if [ "$node" == "compute-gpu-0-0.local" ]; then
     echo "Running on light GPU"
-    source /home/xzcappon/.bashscripts/get_free_mig.bash
+    source /home/xzcapwsl/GroupProject/utils/submit/light_setup.sh
 
     # Check if a GPU was available
     if [ "$GPU_AVAILABLE" -eq 0 ]; then
@@ -55,7 +55,6 @@ if [ "$node" == "compute-gpu-0-0.local" ]; then
 
 fi
 
-echo $CUDA_VISIBLE_DEVICES
 # print host info
 echo "Hostname: $(hostname)"
 echo "CPU count: $(cat /proc/cpuinfo | awk '/^processor/{print $3}' | tail -1)"
@@ -73,5 +72,4 @@ echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 nvidia-smi
 # run the training
 echo "Running training script..."
-salt fit \
-    --config configs/MaskFormer_326k_arvix.yaml --data.num_workers 16 --data.batch_size 12000 -n MF_16workers_10kbatch --force
+salt fit -c ~/salt/salt/configs/MaskFormer_base.yaml -c salt/configs/weighting_DWA.yaml --force
