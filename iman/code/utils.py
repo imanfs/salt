@@ -1,4 +1,5 @@
 import h5py
+import numpy as np
 
 
 def h5py_read(h5path, key, dataset=None, var_name=None):
@@ -28,3 +29,22 @@ def extract_MF_name(path):
     prefix = "MaskFormer_"
     suffix = "_"
     return path.partition(prefix)[2].partition(suffix)[0]
+
+
+def flavour_class_max(objects):
+    class_probs = objects["object_class_probs"]
+    class_probs = np.array(class_probs)
+    class_probs_3d = class_probs.view((np.float32, 3))
+
+    # Find the index of the maximum value across the 3rd dimension
+    max_indices = np.argmax(class_probs_3d, axis=2)
+
+    # Initialize the new column with zeros
+    flavour = np.zeros(class_probs_3d.shape[:2], dtype=int)
+
+    # Assign values based on the max index
+    flavour[max_indices == 0] = 5
+    flavour[max_indices == 1] = 4
+    flavour[max_indices == 2] = -1
+
+    return flavour
