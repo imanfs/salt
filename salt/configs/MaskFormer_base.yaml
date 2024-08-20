@@ -198,6 +198,7 @@ data:
 
   train_file: /home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_train.h5
   val_file: /home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_val.h5
+  test_file: /home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_test_ttbar.h5
   norm_dict: /home/xzcappon/phd/datasets/vertexing_120m/output/norm_dict.yaml
   class_dict: /home/xzcappon/phd/datasets/vertexing_120m/output/class_dict.yaml
   #move_files_temp: /dev/shm/svanstro/salt/gn2/

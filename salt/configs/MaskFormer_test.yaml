@@ -147,8 +147,8 @@ model:
                   context_size: *embed_dim
 
 data:
-  num_train: 5_000
-  num_val: 1_000
+  num_train: 500
+  num_val: 100
   num_test: 500_000
   variables:
     jets:
@@ -198,18 +198,19 @@ data:
 
   train_file: /home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_train.h5
   val_file: /home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_val.h5
+  test_file: /home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_test_ttbar.h5
   norm_dict: /home/xzcappon/phd/datasets/vertexing_120m/output/norm_dict.yaml
   class_dict: /home/xzcappon/phd/datasets/vertexing_120m/output/class_dict.yaml
   #move_files_temp: /dev/shm/svanstro/salt/gn2/
 
-  batch_size: 50
+  batch_size: 100
   num_workers: 10
 
 trainer:
   max_epochs: 4
   accelerator: gpu
   devices: 1
-  precision: 16-mixed
+  precision: bf16-true
   default_root_dir: logs
   callbacks:
     - class_path: salt.callbacks.Checkpoint
