@@ -210,7 +210,7 @@ trainer:
   max_epochs: 4
   accelerator: gpu
   devices: 1
-  precision: bf16-true
+  precision: 16-mixed
   default_root_dir: logs
   callbacks:
     - class_path: salt.callbacks.Checkpoint

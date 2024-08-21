@@ -2,11 +2,20 @@ import warnings
 from collections.abc import Mapping
 
 import lightning as L
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 from salt.models import InputNorm
+
+try:
+    import cvxpy as cp
+except ModuleNotFoundError:
+    import pip
+
+    pip.main(["install", "--user", "cvxpy"])
+    import cvxpy as cp
 
 
 def check_unique(modules: nn.ModuleList, attr_name: str) -> None:
@@ -106,27 +115,58 @@ class ModelWrapperIman(L.LightningModule):
 
     def init_param(self):
         r"""Define and initialize trainable parameters required by specific weighting methods."""
-        if self.weighting == "UW":
-            self.loss_scale = torch.nn.Parameter(torch.tensor([-0.5] * self.task_num))
         if self.weighting == "DWA":
             self.avg_losses = {}  # type: dict[str, torch.Tensor]
             self.batch_losses = {}  # type: dict[str, list[float]]
+        if self.weighting == "UW":
+            self.loss_scale = torch.nn.Parameter(torch.tensor([-0.5] * self.task_num))
         elif self.weighting == "IMTL":
-            self.loss_scale = nn.Parameter(torch.tensor([0.0] * self.task_num))
             self.automatic_optimization = False
+            self.loss_scale = nn.Parameter(torch.tensor([0.0] * self.task_num))
+        elif self.weighting == "Nash_MTL":
+            self.automatic_optimization = False
+            self.step = 0
+            self.prvs_alpha_param = None
+            self.init_gtg = np.eye(self.task_num)
+            self.prvs_alpha = np.ones(self.task_num, dtype=np.float32)
+            self.normalization_factor = np.ones((1,))
+        elif self.weighting == "MoCo":
+            self.automatic_optimization = False
+            self._compute_grad_dim()
+            self.step = 0
+            self.y = torch.zeros(self.task_num, self.grad_dim).to("cuda")
+            self.lambd = (torch.ones([self.task_num]) / self.task_num).to("cuda")
+        elif self.weighting == "DB_MTL":
+            self.automatic_optimization = False
+            self.step = 0
+            self._compute_grad_dim()
+            self.grad_buffer = torch.zeros(self.task_num, self.grad_dim).to("cuda")
 
     def on_fit_start(self):
+        if not self.automatic_optimization:
+            [self.opt], [self.sch] = self.configure_optimizers()  # Access the optimizer
+            #  IMTL has torch.linalg.inv operations which needs 32bit or bfloat16 precision
+
         if self.weighting == "DWA":
             self.train_loss_buffer = torch.zeros([6, self.trainer.max_epochs])
-        elif not self.automatic_optimization:
+
+        if self.weighting == "IMTL":
             assert self.trainer.precision in {
                 "32-true",
                 "bf16-true",
                 "bf16-mixed",
                 "bf16",
             }, "IMTL requires 32-bit or bfloat16 precision."
-            if self.trainer.precision != "32-true":
-                torch.set_default_dtype(torch.bfloat16)
+            # if self.trainer.precision != "32-true":
+            #     torch.set_default_dtype(torch.bfloat16)
+
+        if self.weighting == "DB_MTL":
+            assert self.trainer.precision in {
+                # "32-true", ??
+                "bf16-true",
+                "bf16",
+            }, "DB-MTL requires 32-bit or bfloat16 precision."
+            # torch.set_default_dtype(torch.bfloat16)
 
     def on_train_epoch_start(self):
         # Reset the list of losses and batch sizes at the start of each epoch
@@ -271,6 +311,8 @@ class ModelWrapperIman(L.LightningModule):
         # forward pass
         preds, labels, pad_masks, loss = self.shared_step(batch)
 
+        # log task-specific losses
+        # loss_tasks = loss.copy()
         # log raw losses
         log_loss = loss.copy()
         log_loss = self.total_loss(log_loss)
@@ -290,19 +332,15 @@ class ModelWrapperIman(L.LightningModule):
             "labels": labels,
             "pad_masks": pad_masks,
         }
-        # print("train step loss", {**loss})
-        if self.weighting == "IMTL":
-            opt = self.optimizers()  # Access the optimizer
+        if not self.automatic_optimization:
+            opt = self.optimizers()
             opt.zero_grad()  # Clear previous gradients
-            loss = {key: value.to(torch.bfloat16) for key, value in loss.items()}
-            # print("train step loss", {**loss}, loss["loss"].dtype)
             self.manual_backward(loss)  # Manually perform backward pass
             opt.step()  # Update model parameters
+            self.sch["scheduler"].step()  # Update learning rate
         return {**loss, "outputs": outputs}
 
     def validation_step(self, batch):
-        # if self.weighting == "IMTL":
-        #     self.eval()
         # foward pass
         preds, labels, pad_masks, loss = self.shared_step(batch)
 
@@ -319,16 +357,13 @@ class ModelWrapperIman(L.LightningModule):
             "labels": labels,
             "pad_masks": pad_masks,
         }
-        if self.weighting == "IMTL":
-            loss = {key: value.to(torch.bfloat16) for key, value in loss.items()}
-        # print("val step loss", {**loss})
+
         return {**loss, "outputs": outputs}
 
     def manual_backward(self, loss):
         if self.weighting == "IMTL":
             grads = self._get_grads(loss, mode="backward").to("cuda")
-            # print(grads, grads.dtype, grads.device)
-            grads_unit = grads / torch.norm(grads, p=2, dim=-1, keepdim=True)
+            grads_unit = grads / torch.norm(grads + 1e-8, p=2, dim=-1, keepdim=True)
 
             D = grads[0:1].repeat(self.task_num - 1, 1) - grads[1:]
             U = grads_unit[0:1].repeat(self.task_num - 1, 1) - grads_unit[1:]
@@ -338,12 +373,11 @@ class ModelWrapperIman(L.LightningModule):
                 U_fp32 = U.to(torch.float32)
                 grads_0_fp32 = grads[0].to(torch.float32)
 
-                # Perform matrix operations in fp32
-                DU_t = torch.matmul(D_fp32, U_fp32.t())
+                DU_t = torch.matmul(D_fp32, U_fp32.t()).to(torch.float32)
+
                 DU_t_inv = torch.linalg.inv(DU_t)  # Using linalg.inv instead of inverse
                 alpha_fp32 = torch.matmul(torch.matmul(grads_0_fp32, U_fp32.t()), DU_t_inv)
 
-                # Convert the result back to the original dtype (presumably bf16)
                 alpha = alpha_fp32.to(grads.dtype)
             else:
                 alpha = torch.matmul(
@@ -355,7 +389,107 @@ class ModelWrapperIman(L.LightningModule):
                 pass
             else:
                 self._backward_new_grads(alpha, grads=grads)
-                # print(grads, grads.dtype, grads.device)
+
+        elif self.weighting == "Aligned_MTL":
+            grads = self._get_grads(loss, mode="backward").to("cuda")
+            if self.rep_grad:
+                per_grads, grads = grads[0], grads[1]
+
+            M = torch.matmul(grads, grads.t())  # [num_tasks, num_tasks]
+            lmbda, V = torch.symeig(M, eigenvectors=True)
+            tol = torch.max(lmbda) * max(M.shape[-2:]) * torch.finfo().eps
+            rank = sum(lmbda > tol)
+
+            order = torch.argsort(lmbda, dim=-1, descending=True)
+            lmbda, V = lmbda[order][:rank], V[:, order][:, :rank]
+
+            sigma = torch.diag(1 / lmbda.sqrt())
+            B = lmbda[-1].sqrt() * ((V @ sigma) @ V.t())
+            alpha = B.sum(0)
+
+            if self.rep_grad:
+                self._backward_new_grads(alpha, per_grads=per_grads)
+            else:
+                self._backward_new_grads(alpha, grads=grads)
+
+        elif self.weighting == "Nash_MTL":
+            self.update_weights_every = 1
+            self.optim_niter = 20
+            self.max_norm = 1.0
+
+            if self.step == 0:
+                self._init_optim_problem()
+            if (self.step % self.update_weights_every) == 0:
+                self.step += 1
+
+                if self.rep_grad:
+                    raise ValueError(
+                        "No support method Nash_MTL with representation gradients (rep_grad=True)"
+                    )
+                self._compute_grad_dim()
+                grads = self._compute_grad(loss, mode="autograd")
+
+                GTG = torch.mm(grads, grads.t())
+                self.normalization_factor = torch.norm(GTG).detach().cpu().numpy().reshape((1,))
+                GTG = GTG / self.normalization_factor.item()
+                alpha = self.solve_optimization(GTG.cpu().detach().numpy())
+            else:
+                self.step += 1
+                alpha = self.prvs_alpha
+
+            alpha = torch.from_numpy(alpha).to(torch.float32).to(self.device)
+            torch.sum(alpha * loss).backward()
+
+            if self.max_norm > 0:
+                torch.nn.utils.clip_grad_norm_(self.get_share_params(), self.max_norm)
+
+        elif self.weighting == "MoCo":
+            self.step += 1
+            beta, beta_sigma = 0.5, 0.5  # kwargs['MoCo_beta'], kwargs['MoCo_beta_sigma']
+            gamma, gamma_sigma = 0.1, 0.5  # kwargs['MoCo_gamma'], kwargs['MoCo_gamma_sigma']
+            rho = 0  # kwargs['MoCo_rho']
+            if self.rep_grad:
+                raise ValueError(
+                    "No support method MoCo with representation gradients (rep_grad=True)"
+                )
+            self._compute_grad_dim()
+            grads = self._compute_grad(loss, mode="backward").to("cuda")
+            with torch.no_grad():
+                for tn, task in enumerate(self.task_name):
+                    grads[tn] = grads[tn] / (grads[tn].norm() + 1e-8) * loss[task]
+            self.y = self.y - (beta / self.step**beta_sigma) * (self.y - grads)
+            self.lambd = F.softmax(
+                self.lambd
+                - (gamma / self.step**gamma_sigma)
+                * (self.y @ self.y.t() + rho * torch.eye(self.task_num).to("cuda"))
+                @ self.lambd,
+                -1,
+            )
+            new_grads = (self.y.t() @ self.lambd).to(torch.float32)
+            self._reset_grad(new_grads)
+        elif self.weighting == "DB_MTL":
+            self.step += 1
+            beta = 0.9  # kwargs['DB_beta']
+            beta_sigma = 0  # kwargs['DB_beta_sigma']
+
+            if self.rep_grad:
+                raise ValueError(
+                    "No support method DB_MTL with representation gradients (rep_grad=True)"
+                )
+            self._compute_grad_dim()
+            log_loss = {k: torch.log(v + 1e-8) for k, v in loss.items()}
+            batch_grads = self._compute_grad(log_loss, mode="backward").to("cuda")
+            # [task_num, grad_dim]
+
+            self.grad_buffer = batch_grads + (beta / self.step**beta_sigma) * (
+                self.grad_buffer - batch_grads
+            )
+
+            u_grad = self.grad_buffer.norm(dim=-1)
+
+            alpha = u_grad.max() / (u_grad + 1e-8)
+            new_grads = sum([alpha[i] * self.grad_buffer[i] for i in range(self.task_num)])
+            self._reset_grad(new_grads.to(torch.bfloat16))
         else:
             loss["loss"].backward()
 
@@ -429,9 +563,16 @@ class ModelWrapperIman(L.LightningModule):
                 elif mode == "autograd":
                     grad = list(
                         torch.autograd.grad(
-                            losses[task], self.get_share_params(), retain_graph=True
+                            losses[task],
+                            self.get_share_params(),
+                            retain_graph=True,
+                            allow_unused=True,
                         )
                     )
+                    for i, g in enumerate(grad):
+                        if g is None:
+                            print(i, g)
+                    print(len(list(self.get_share_params())), list(self.get_share_params()))
                     grads[tn] = torch.cat([g.view(-1) for g in grad])
                 else:
                     raise ValueError("No support {} mode for gradient computation")
@@ -518,3 +659,59 @@ class ModelWrapperIman(L.LightningModule):
             self.rep_tasks[task].requires_grad = True
             return self.rep_tasks[task]
         return rep
+
+    # IMTL ####
+    def _stop_criteria(self, gtg, alpha_t):
+        return (
+            (self.alpha_param.value is None)
+            or (np.linalg.norm(gtg @ alpha_t - 1 / (alpha_t + 1e-10)) < 1e-3)
+            or (np.linalg.norm(self.alpha_param.value - self.prvs_alpha_param.value) < 1e-6)
+        )
+
+    def solve_optimization(self, gtg):
+        self.G_param.value = gtg
+        self.normalization_factor_param.value = self.normalization_factor
+
+        alpha_t = self.prvs_alpha
+        for _ in range(self.optim_niter):
+            self.alpha_param.value = alpha_t
+            self.prvs_alpha_param.value = alpha_t
+
+            try:
+                self.prob.solve(solver=cp.ECOS, warm_start=True, max_iters=100)
+            except:  # noqa: E722
+                self.alpha_param.value = self.prvs_alpha_param.value
+
+            if self._stop_criteria(gtg, alpha_t):
+                break
+
+            alpha_t = self.alpha_param.value
+
+        if alpha_t is not None:
+            self.prvs_alpha = alpha_t
+
+        return self.prvs_alpha
+
+    def _calc_phi_alpha_linearization(self):
+        G_prvs_alpha = self.G_param @ self.prvs_alpha_param
+        prvs_phi_tag = 1 / self.prvs_alpha_param + (1 / G_prvs_alpha) @ self.G_param
+        return prvs_phi_tag @ (self.alpha_param - self.prvs_alpha_param)  # phi_alpha
+
+    def _init_optim_problem(self):
+        self.alpha_param = cp.Variable(shape=(self.task_num,), nonneg=True)
+        self.prvs_alpha_param = cp.Parameter(shape=(self.task_num,), value=self.prvs_alpha)
+        self.G_param = cp.Parameter(shape=(self.task_num, self.task_num), value=self.init_gtg)
+        self.normalization_factor_param = cp.Parameter(shape=(1,), value=np.array([1.0]))
+
+        self.phi_alpha = self._calc_phi_alpha_linearization()
+
+        G_alpha = self.G_param @ self.alpha_param
+        constraint = []
+        for i in range(self.task_num):
+            constraint.extend([
+                -cp.log(self.alpha_param[i] * self.normalization_factor_param) - cp.log(G_alpha[i])
+                <= 0
+                for i in range(self.task_num)
+            ])
+        obj = cp.Minimize(cp.sum(G_alpha) + self.phi_alpha / self.normalization_factor_param)
+        self.prob = cp.Problem(obj, constraint)
