@@ -45,8 +45,8 @@ def plt_roc(RocPlot, sig_eff, bkg_rej, n_test, rej_class, name):
 
 
 fname_default = (
-    "/home/xucabis2/salt/logs/MaskFormer_default_20240724-T112538/"
-    "ckpts/epoch=019-val_loss=0.65355__test_ttbar.h5"
+    "/home/xucabis2/salt/logs/_old/_pre-b-hadron-weighting/_baselines/"
+    "MaskFormer_default_20240724-T112538/ckpts/epoch=019-val_loss=0.65355__test_ttbar.h5"
 )
 
 fname_gls = (
@@ -69,7 +69,24 @@ fname_dwa = (
     "ckpts/epoch=019-val_loss=0.64425__test_ttbar.h5"
 )
 
-fnames_preds = [fname_gls, fname_dwa]
+fname_aligned = (
+    "/home/xucabis2/salt/logs/MaskFormer_AlignedMTL_20240821-T131155/"
+    "ckpts/epoch=019-val_loss=0.64403__test_ttbar.h5"
+)
+
+fname_cagrad = (
+    "/home/xucabis2/salt/logs/MaskFormer_CAGrad_20240821-T141325/"
+    "ckpts/epoch=019-val_loss=0.64449__test_ttbar.h5"
+)
+
+fname_pcgrad = (
+    "/home/xucabis2/salt/logs/MaskFormer_PCGrad_20240821-T140219/"
+    "ckpts/epoch=019-val_loss=0.64397__test_ttbar.h5"
+)
+
+fnames_preds = [fname_default, fname_aligned, fname_cagrad, fname_pcgrad]
+
+# fnames_preds = [fname_gls, fname_dwa]
 
 reader = H5Reader(fname_default, batch_size=1_000)
 df = pd.DataFrame(
@@ -125,7 +142,6 @@ plt_roc(plot_roc, sig_eff, mf_cjets_rej, n_jets_c, "cjets", "default")
 for fname in fnames_preds:
     mf_name = extract_MF_name(fname)
     tag = mf_name
-    print(mf_name, fname)
     mf_name = "default" if fname == fname_gls else mf_name
     reader = H5Reader(fname, batch_size=1_000)
     df = pd.DataFrame(

@@ -1,3 +1,4 @@
+import random
 import warnings
 from collections.abc import Mapping
 
@@ -5,6 +6,7 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy.optimize import minimize
 from torch import nn
 
 from salt.models import InputNorm
@@ -109,20 +111,23 @@ class ModelWrapperIman(L.LightningModule):
 
         self.init_param()
         self.rep_grad = False
-        # if self.rep_grad:
-        #     self.rep_tasks = {}  # type: dict[str, torch.Tensor]
-        #     self.rep = {}  # type: dict[str, torch.Tensor]
 
     def init_param(self):
         r"""Define and initialize trainable parameters required by specific weighting methods."""
         if self.weighting == "DWA":
             self.avg_losses = {}  # type: dict[str, torch.Tensor]
             self.batch_losses = {}  # type: dict[str, list[float]]
-        if self.weighting == "UW":
+
+        elif self.weighting == "UW":
             self.loss_scale = torch.nn.Parameter(torch.tensor([-0.5] * self.task_num))
+
+        elif self.weighting in {"Aligned_MTL", "PCGrad", "CAGrad"}:
+            self.automatic_optimization = False
+
         elif self.weighting == "IMTL":
             self.automatic_optimization = False
             self.loss_scale = nn.Parameter(torch.tensor([0.0] * self.task_num))
+
         elif self.weighting == "Nash_MTL":
             self.automatic_optimization = False
             self.step = 0
@@ -130,43 +135,33 @@ class ModelWrapperIman(L.LightningModule):
             self.init_gtg = np.eye(self.task_num)
             self.prvs_alpha = np.ones(self.task_num, dtype=np.float32)
             self.normalization_factor = np.ones((1,))
+
         elif self.weighting == "MoCo":
             self.automatic_optimization = False
             self._compute_grad_dim()
             self.step = 0
             self.y = torch.zeros(self.task_num, self.grad_dim).to("cuda")
             self.lambd = (torch.ones([self.task_num]) / self.task_num).to("cuda")
+
         elif self.weighting == "DB_MTL":
             self.automatic_optimization = False
             self.step = 0
             self._compute_grad_dim()
             self.grad_buffer = torch.zeros(self.task_num, self.grad_dim).to("cuda")
 
+        elif self.weighting == "GradVac":
+            self.automatic_optimization = False
+            self.step = 0
+
     def on_fit_start(self):
         if not self.automatic_optimization:
             [self.opt], [self.sch] = self.configure_optimizers()  # Access the optimizer
             #  IMTL has torch.linalg.inv operations which needs 32bit or bfloat16 precision
-
+            assert (
+                self.trainer.precision != "16-mixed"
+            ), f"{self.weighting} requires 32-bit or bfloat16 precision for manual optimization. "
         if self.weighting == "DWA":
             self.train_loss_buffer = torch.zeros([6, self.trainer.max_epochs])
-
-        if self.weighting == "IMTL":
-            assert self.trainer.precision in {
-                "32-true",
-                "bf16-true",
-                "bf16-mixed",
-                "bf16",
-            }, "IMTL requires 32-bit or bfloat16 precision."
-            # if self.trainer.precision != "32-true":
-            #     torch.set_default_dtype(torch.bfloat16)
-
-        if self.weighting == "DB_MTL":
-            assert self.trainer.precision in {
-                # "32-true", ??
-                "bf16-true",
-                "bf16",
-            }, "DB-MTL requires 32-bit or bfloat16 precision."
-            # torch.set_default_dtype(torch.bfloat16)
 
     def on_train_epoch_start(self):
         # Reset the list of losses and batch sizes at the start of each epoch
@@ -337,7 +332,8 @@ class ModelWrapperIman(L.LightningModule):
             opt.zero_grad()  # Clear previous gradients
             self.manual_backward(loss)  # Manually perform backward pass
             opt.step()  # Update model parameters
-            self.sch["scheduler"].step()  # Update learning rate
+            # self.sch["scheduler"].step()  # Update learning rate
+            self.lr_schedulers().step()
         return {**loss, "outputs": outputs}
 
     def validation_step(self, batch):
@@ -396,7 +392,7 @@ class ModelWrapperIman(L.LightningModule):
                 per_grads, grads = grads[0], grads[1]
 
             M = torch.matmul(grads, grads.t())  # [num_tasks, num_tasks]
-            lmbda, V = torch.symeig(M, eigenvectors=True)
+            lmbda, V = torch.linalg.eigh(M.to(torch.float32))  # , UPLO="U" if upper else "L")
             tol = torch.max(lmbda) * max(M.shape[-2:]) * torch.finfo().eps
             rank = sum(lmbda > tol)
 
@@ -405,7 +401,7 @@ class ModelWrapperIman(L.LightningModule):
 
             sigma = torch.diag(1 / lmbda.sqrt())
             B = lmbda[-1].sqrt() * ((V @ sigma) @ V.t())
-            alpha = B.sum(0)
+            alpha = B.sum(0).to(grads.dtype)
 
             if self.rep_grad:
                 self._backward_new_grads(alpha, per_grads=per_grads)
@@ -421,7 +417,6 @@ class ModelWrapperIman(L.LightningModule):
                 self._init_optim_problem()
             if (self.step % self.update_weights_every) == 0:
                 self.step += 1
-
                 if self.rep_grad:
                     raise ValueError(
                         "No support method Nash_MTL with representation gradients (rep_grad=True)"
@@ -430,15 +425,23 @@ class ModelWrapperIman(L.LightningModule):
                 grads = self._compute_grad(loss, mode="autograd")
 
                 GTG = torch.mm(grads, grads.t())
-                self.normalization_factor = torch.norm(GTG).detach().cpu().numpy().reshape((1,))
+                self.normalization_factor = (
+                    torch.norm(GTG, dtype=torch.float32)
+                    .detach()
+                    .to(torch.float32)
+                    .cpu()
+                    .numpy()
+                    .reshape((1,))
+                )
                 GTG = GTG / self.normalization_factor.item()
-                alpha = self.solve_optimization(GTG.cpu().detach().numpy())
+                alpha = self.solve_optimization(GTG.to(torch.float32).cpu().detach().numpy())
             else:
                 self.step += 1
                 alpha = self.prvs_alpha
 
-            alpha = torch.from_numpy(alpha).to(torch.float32).to(self.device)
-            torch.sum(alpha * loss).backward()
+            alpha = torch.from_numpy(alpha).to(torch.bfloat16).to(self.device)
+            loss = {task: alpha[tn] * loss[task] for tn, task in enumerate(self.task_name)}
+            sum(subloss for subloss in loss.values()).backward()
 
             if self.max_norm > 0:
                 torch.nn.utils.clip_grad_norm_(self.get_share_params(), self.max_norm)
@@ -456,26 +459,26 @@ class ModelWrapperIman(L.LightningModule):
             grads = self._compute_grad(loss, mode="backward").to("cuda")
             with torch.no_grad():
                 for tn, task in enumerate(self.task_name):
-                    grads[tn] = grads[tn] / (grads[tn].norm() + 1e-8) * loss[task]
+                    grads[tn] = grads[tn] / (grads[tn].norm() + 1e-6) * loss[task]
             self.y = self.y - (beta / self.step**beta_sigma) * (self.y - grads)
             self.lambd = F.softmax(
                 self.lambd
                 - (gamma / self.step**gamma_sigma)
-                * (self.y @ self.y.t() + rho * torch.eye(self.task_num).to("cuda"))
+                * (
+                    self.y @ self.y.t()
+                    + rho * torch.eye(self.task_num, dtype=torch.float32).to("cuda")
+                )
                 @ self.lambd,
                 -1,
             )
-            new_grads = (self.y.t() @ self.lambd).to(torch.float32)
-            self._reset_grad(new_grads)
+            new_grads = self.y.t() @ self.lambd
+            self._reset_grad(new_grads.to(torch.bfloat16))
+
         elif self.weighting == "DB_MTL":
             self.step += 1
             beta = 0.9  # kwargs['DB_beta']
             beta_sigma = 0  # kwargs['DB_beta_sigma']
 
-            if self.rep_grad:
-                raise ValueError(
-                    "No support method DB_MTL with representation gradients (rep_grad=True)"
-                )
             self._compute_grad_dim()
             log_loss = {k: torch.log(v + 1e-8) for k, v in loss.items()}
             batch_grads = self._compute_grad(log_loss, mode="backward").to("cuda")
@@ -486,10 +489,107 @@ class ModelWrapperIman(L.LightningModule):
             )
 
             u_grad = self.grad_buffer.norm(dim=-1)
-
             alpha = u_grad.max() / (u_grad + 1e-8)
             new_grads = sum([alpha[i] * self.grad_buffer[i] for i in range(self.task_num)])
             self._reset_grad(new_grads.to(torch.bfloat16))
+
+        elif self.weighting == "PCGrad":
+            batch_weight = np.ones(len(loss))
+            self._compute_grad_dim()
+            grads = self._compute_grad(loss, mode="backward").to("cuda")  # [task_num, grad_dim]
+            pc_grads = grads.clone()
+            for tn_i in range(self.task_num):
+                task_index = torch.randperm(self.task_num, device="cuda")
+                for tn_j in task_index:
+                    g_ij = torch.dot(pc_grads[tn_i], grads[tn_j])
+                    if g_ij < 0:
+                        pc_grads[tn_i] -= g_ij * grads[tn_j] / (grads[tn_j].norm().pow(2) + 1e-8)
+                        batch_weight[tn_j] -= (g_ij / (grads[tn_j].norm().pow(2) + 1e-8)).item()
+            new_grads = pc_grads.sum(0)
+            self._reset_grad(new_grads)
+
+        elif self.weighting == "CAGrad":
+            calpha, rescale = 0.5, 1  # kwargs["calpha"], kwargs["rescale"]
+
+            self._compute_grad_dim()
+            grads = self._compute_grad(loss, mode="backward").to("cuda")
+
+            GG = torch.matmul(grads, grads.t()).cpu()  # [num_tasks, num_tasks]
+            g0_norm = (GG.mean() + 1e-8).sqrt()  # norm of the average gradient
+
+            x_start = np.ones(self.task_num) / self.task_num
+            bnds = tuple((0, 1) for x in x_start)
+            cons = {"type": "eq", "fun": lambda x: 1 - sum(x)}
+            A = GG.to(torch.float32).numpy()
+            b = x_start.copy()
+            c = (calpha * g0_norm + 1e-8).item()
+
+            def objfn(x):
+                return (
+                    x.reshape(1, -1).dot(A).dot(b.reshape(-1, 1))
+                    + c * np.sqrt(x.reshape(1, -1).dot(A).dot(x.reshape(-1, 1)) + 1e-8)
+                ).sum()
+
+            res = minimize(objfn, x_start, bounds=bnds, constraints=cons)
+            w_cpu = res.x
+            ww = torch.Tensor(w_cpu).to(self.device)
+            gw = (grads * ww.view(-1, 1)).sum(0)
+            gw_norm = gw.norm()
+            lmbda = c / (gw_norm + 1e-8)
+            g = grads.mean(0) + lmbda * gw
+            if rescale == 0:
+                new_grads = g
+            elif rescale == 1:
+                new_grads = g / (1 + calpha**2)
+            elif rescale == 2:
+                new_grads = g / (1 + calpha)
+            else:
+                raise ValueError(f"No support rescale type {rescale}")
+            self._reset_grad(new_grads)
+
+        elif self.weighting == "GradVac":
+            beta = 0.5  # kwargs['GradVac_beta']
+            group_type = 0  # kwargs['GradVac_group_type']
+            if self.step == 0:
+                self._init_rho(group_type)
+
+            self._compute_grad_dim()
+            grads = self._compute_grad(loss, mode="backward").to("cuda")  # [task_num, grad_dim]
+
+            batch_weight = np.ones(len(loss))
+            pc_grads = grads.clone()
+            for tn_i in range(self.task_num):
+                task_index = list(range(self.task_num))
+                task_index.remove(tn_i)
+                random.shuffle(task_index)
+                for tn_j in task_index:
+                    for k in range(len(self.k_idx)):
+                        beg, end = sum(self.k_idx[:k]), sum(self.k_idx[: k + 1])
+                        if end == -1:
+                            end = grads.size()[-1]
+                        rho_ijk = torch.dot(pc_grads[tn_i, beg:end], grads[tn_j, beg:end]) / (
+                            pc_grads[tn_i, beg:end].norm() * grads[tn_j, beg:end].norm() + 1e-8
+                        )
+                        if rho_ijk < self.rho_T[tn_i, tn_j, k]:
+                            w = (
+                                pc_grads[tn_i, beg:end].norm()
+                                * (
+                                    self.rho_T[tn_i, tn_j, k] * (1 - rho_ijk**2).sqrt()
+                                    - rho_ijk * (1 - self.rho_T[tn_i, tn_j, k] ** 2).sqrt()
+                                )
+                                / (
+                                    grads[tn_j, beg:end].norm()
+                                    * (1 - self.rho_T[tn_i, tn_j, k] ** 2).sqrt()
+                                    + 1e-8
+                                )
+                            )
+                            pc_grads[tn_i, beg:end] += grads[tn_j, beg:end] * w
+                        self.rho_T[tn_i, tn_j, k] = (1 - beta) * self.rho_T[
+                            tn_i, tn_j, k
+                        ] + beta * rho_ijk
+            new_grads = pc_grads.sum(0)
+            self._reset_grad(new_grads)
+            self.step += 1
         else:
             loss["loss"].backward()
 
@@ -569,10 +669,15 @@ class ModelWrapperIman(L.LightningModule):
                             allow_unused=True,
                         )
                     )
-                    for i, g in enumerate(grad):
+
+                    # grad = [g if g is not None else torch.Tensor(0).to("cuda") for g in grad]
+                    for i, (g, param) in enumerate(
+                        zip(grad, self.get_share_params(), strict=False)
+                    ):
                         if g is None:
-                            print(i, g)
-                    print(len(list(self.get_share_params())), list(self.get_share_params()))
+                            grad[i] = torch.zeros_like(
+                                param
+                            )  # Replace None gradient with a tensor of zeros
                     grads[tn] = torch.cat([g.view(-1) for g in grad])
                 else:
                     raise ValueError("No support {} mode for gradient computation")
@@ -674,6 +779,7 @@ class ModelWrapperIman(L.LightningModule):
 
         alpha_t = self.prvs_alpha
         for _ in range(self.optim_niter):
+            alpha_t = np.abs(alpha_t)  # ensures that alpha_t is non-negative in edge cases
             self.alpha_param.value = alpha_t
             self.prvs_alpha_param.value = alpha_t
 
@@ -715,3 +821,19 @@ class ModelWrapperIman(L.LightningModule):
             ])
         obj = cp.Minimize(cp.sum(G_alpha) + self.phi_alpha / self.normalization_factor_param)
         self.prob = cp.Problem(obj, constraint)
+
+    # GRADVAC ####
+    def _init_rho(self, group_type):
+        if group_type == 0:  # whole_model
+            self.k_idx = [-1]
+        elif group_type == 1:  # all_layer
+            self.k_idx = []
+            for module in self.encoder.modules():
+                # if len(module._modules.items()) == 0 and len(module._parameters) > 0:
+                self.k_idx.append(sum([w.data.numel() for w in module.parameters()]))
+        elif group_type == 2:  # all_matrix
+            self._compute_grad_dim()
+            self.k_idx = self.grad_index
+        else:
+            raise ValueError
+        self.rho_T = torch.zeros(self.task_num, self.task_num, len(self.k_idx)).to("cuda")

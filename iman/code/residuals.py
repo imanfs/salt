@@ -193,7 +193,22 @@ fname_gls_old = (
     "MaskFormer_GLS_20240730-T002427/ckpts/epoch=018-val_loss=0.65171__test_ttbar.h5"
 )
 
-fnames_preds = [fname_default, fname_gls_old, fname_dwa, fname_uw]
+fname_aligned = (
+    "/home/xucabis2/salt/logs/MaskFormer_AlignedMTL_20240821-T131155/"
+    "ckpts/epoch=019-val_loss=0.64403__test_ttbar.h5"
+)
+
+fname_cagrad = (
+    "/home/xucabis2/salt/logs/MaskFormer_CAGrad_20240821-T141325/"
+    "ckpts/epoch=019-val_loss=0.64449__test_ttbar.h5"
+)
+
+fname_pcgrad = (
+    "/home/xucabis2/salt/logs/MaskFormer_PCGrad_20240821-T140219/"
+    "ckpts/epoch=019-val_loss=0.64397__test_ttbar.h5"
+)
+
+fnames_preds = [fname_default, fname_aligned, fname_cagrad, fname_pcgrad]
 
 
 fname_truth = "/home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_test_ttbar.h5"
@@ -208,19 +223,19 @@ variables = ["pt", "deta", "dphi", "Lxy", "mass"]
 #     object_residuals(fnames_preds, fname_truth, variable, norm=True)
 #     object_residuals(fnames_preds, fname_truth, variable, norm=False)
 
-# object_residuals(fnames_preds, fname_truth, "dphi", plot_range=(-4, 5), norm=True)
-# object_residuals(fnames_preds, fname_truth, "dphi", plot_range=(-0.1, 0.1), norm=False)
+object_residuals(fnames_preds, fname_truth, "dphi", plot_range=(-4, 5), norm=True)
+object_residuals(fnames_preds, fname_truth, "dphi", plot_range=(-0.1, 0.1), norm=False)
 
-# object_residuals(fnames_preds, fname_truth, "deta", plot_range=(-4, 5), norm=True)
-# object_residuals(fnames_preds, fname_truth, "deta", plot_range=(-0.1, 0.1), norm=False)
+object_residuals(fnames_preds, fname_truth, "deta", plot_range=(-4, 5), norm=True)
+object_residuals(fnames_preds, fname_truth, "deta", plot_range=(-0.1, 0.1), norm=False)
 
-# object_residuals(fnames_preds, fname_truth, "Lxy", (1, np.inf), plot_range=(-1, 2), norm=True)
-# object_residuals(fnames_preds, fname_truth, "Lxy", (0, 1), plot_range=(-6, 6), norm=False)
+object_residuals(fnames_preds, fname_truth, "Lxy", (1, np.inf), plot_range=(-1, 2), norm=True)
+object_residuals(fnames_preds, fname_truth, "Lxy", (0, 1), plot_range=(-6, 6), norm=False)
 
 # object_residuals(fnames_preds, fname_truth, "mass", plot_range=(-1, 0.5), norm=True)
 # object_residuals(fnames_preds, fname_truth, "mass", plot_range=(-750, 500), norm=False)
 
-# object_residuals(fnames_preds, fname_truth, "pt", plot_range=(-2, 4), norm=True)
+object_residuals(fnames_preds, fname_truth, "pt", plot_range=(-2, 4), norm=True)
 
 object_residuals(fnames_preds, fname_truth, "mass", plot_range=(-1, 2.5), norm=True)
 object_residuals(fnames_preds, fname_truth, "mass", plot_range=(-4200.0, 4700.0), norm=False)
