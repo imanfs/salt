@@ -108,12 +108,14 @@ class ModelWrapperIman(L.LightningModule):
         self.loss_weights = self.model.mask_decoder.mask_loss.loss_weights
         self.task_num = len(self.loss_weights)
         self.task_name = list(self.loss_weights.keys())
-
         self.init_param()
         self.rep_grad = False
+        self.cos_sim = nn.CosineSimilarity(dim=0)
 
     def init_param(self):
         r"""Define and initialize trainable parameters required by specific weighting methods."""
+        if self.weighting == "static":
+            self._compute_grad_dim()
         if self.weighting == "DWA":
             self.avg_losses = {}  # type: dict[str, torch.Tensor]
             self.batch_losses = {}  # type: dict[str, list[float]]
@@ -187,11 +189,18 @@ class ModelWrapperIman(L.LightningModule):
             for k in list(losses.keys()):
                 losses[k] *= self.loss_weights[k]
 
+        elif self.weighting == "GLS":
+            loss_values = torch.tensor(list(losses.values()))  # Extract loss values as a tensor
+            lossprod = loss_values.prod()  # Compute the product of all loss values
+
+            self.loss_weights = {k: loss / (self.task_num * lossprod) for k, loss in losses.items()}
+
         elif self.weighting == "RLW":
             weights = F.softmax(torch.randn(self.task_num), dim=-1)
             # Apply weights to each loss
             for i, k in enumerate(list(losses.keys())):
                 losses[k] *= weights[i]
+            self.loss_weights = {k: weights[i] for i, k in enumerate(self.task_name)}
 
         elif self.weighting == "DWA":
             T = 2.0
@@ -206,19 +215,23 @@ class ModelWrapperIman(L.LightningModule):
                 weights = torch.ones(self.task_num)
             for i, k in enumerate(list(losses.keys())):
                 losses[k] *= weights[i]
+            self.loss_weights = {k: weights[i] for i, k in enumerate(self.task_name)}
 
         elif self.weighting == "UW":
-            weighted_losses = {
+            losses = {
                 key: value / (2 * self.loss_scale[i].exp()) + self.loss_scale[i] / 2
                 for i, (key, value) in enumerate(losses.items())
             }
-            losses = weighted_losses
+            self.loss_weights = {
+                k: 1 / (2 * self.loss_scale[i].exp()) for i, k in enumerate(self.task_name)
+            }
 
         elif self.weighting == "IMTL":
             losses = {
                 key: self.loss_scale[i].exp() * value - self.loss_scale[i]
                 for i, (key, value) in enumerate(losses.items())
             }
+            self.loss_weights = {k: self.loss_scale[i].exp() for i, k in enumerate(self.task_name)}
         return losses
 
     def total_loss(self, loss: dict):
@@ -302,13 +315,22 @@ class ModelWrapperIman(L.LightningModule):
             n = f"{stage}_{t}_loss" if "loss" not in t else f"{stage}_{t}"
             self.log(n, loss_value, **kwargs)
 
+    def log_weights(self, weights, stage):
+        kwargs = {"sync_dist": len(self.trainer.device_ids) > 1}
+        for t, weight in weights.items():
+            n = f"{stage}_{t}_weights"
+            self.log(n, weight, **kwargs)
+
+    def log_cossim(self, task_pairs, cos_sims):
+        kwargs = {"sync_dist": len(self.trainer.device_ids) > 1}
+        for (task_a, task_b), cos_sim in zip(task_pairs, cos_sims, strict=False):
+            n = f"cos_sim_{task_a}_{task_b}"
+            self.log(n, cos_sim, **kwargs)
+
     def training_step(self, batch):
         # forward pass
         preds, labels, pad_masks, loss = self.shared_step(batch)
 
-        # log task-specific losses
-        # loss_tasks = loss.copy()
-        # log raw losses
         log_loss = loss.copy()
         log_loss = self.total_loss(log_loss)
         self.log_losses(log_loss, stage="train")
@@ -327,13 +349,21 @@ class ModelWrapperIman(L.LightningModule):
             "labels": labels,
             "pad_masks": pad_masks,
         }
-        if not self.automatic_optimization:
+
+        if self.automatic_optimization:
+            self.log_weights(self.loss_weights, stage="train")
+            self.new_grads = self._compute_grad(loss, mode="no_grad")  # for cossim calculation
+
+        else:
             opt = self.optimizers()
             opt.zero_grad()  # Clear previous gradients
             self.manual_backward(loss)  # Manually perform backward pass
             opt.step()  # Update model parameters
-            # self.sch["scheduler"].step()  # Update learning rate
             self.lr_schedulers().step()
+            self.log_weights(self.alpha, stage="train")
+
+        self.compute_pairwise_cossim(self.new_grads)
+        self.log_cossim(self.task_pairs, self.cos_sims)
         return {**loss, "outputs": outputs}
 
     def validation_step(self, batch):
@@ -388,6 +418,7 @@ class ModelWrapperIman(L.LightningModule):
 
         elif self.weighting == "Aligned_MTL":
             grads = self._get_grads(loss, mode="backward").to("cuda")
+
             if self.rep_grad:
                 per_grads, grads = grads[0], grads[1]
 
@@ -417,10 +448,7 @@ class ModelWrapperIman(L.LightningModule):
                 self._init_optim_problem()
             if (self.step % self.update_weights_every) == 0:
                 self.step += 1
-                if self.rep_grad:
-                    raise ValueError(
-                        "No support method Nash_MTL with representation gradients (rep_grad=True)"
-                    )
+
                 self._compute_grad_dim()
                 grads = self._compute_grad(loss, mode="autograd")
 
@@ -435,26 +463,24 @@ class ModelWrapperIman(L.LightningModule):
                 )
                 GTG = GTG / self.normalization_factor.item()
                 alpha = self.solve_optimization(GTG.to(torch.float32).cpu().detach().numpy())
+                self.new_grads = grads
             else:
                 self.step += 1
                 alpha = self.prvs_alpha
-
+            # record alpha for weight logging
             alpha = torch.from_numpy(alpha).to(torch.bfloat16).to(self.device)
             loss = {task: alpha[tn] * loss[task] for tn, task in enumerate(self.task_name)}
             sum(subloss for subloss in loss.values()).backward()
 
             if self.max_norm > 0:
-                torch.nn.utils.clip_grad_norm_(self.get_share_params(), self.max_norm)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_norm)
 
         elif self.weighting == "MoCo":
             self.step += 1
             beta, beta_sigma = 0.5, 0.5  # kwargs['MoCo_beta'], kwargs['MoCo_beta_sigma']
             gamma, gamma_sigma = 0.1, 0.5  # kwargs['MoCo_gamma'], kwargs['MoCo_gamma_sigma']
             rho = 0  # kwargs['MoCo_rho']
-            if self.rep_grad:
-                raise ValueError(
-                    "No support method MoCo with representation gradients (rep_grad=True)"
-                )
+
             self._compute_grad_dim()
             grads = self._compute_grad(loss, mode="backward").to("cuda")
             with torch.no_grad():
@@ -471,8 +497,10 @@ class ModelWrapperIman(L.LightningModule):
                 @ self.lambd,
                 -1,
             )
-            new_grads = self.y.t() @ self.lambd
-            self._reset_grad(new_grads.to(torch.bfloat16))
+            self.new_grads = self.y.t() @ self.lambd
+            self._reset_grad(self.new_grads.to(torch.bfloat16))
+            # record alpha for weight logging
+            alpha = self.lambd
 
         elif self.weighting == "DB_MTL":
             self.step += 1
@@ -481,17 +509,15 @@ class ModelWrapperIman(L.LightningModule):
 
             self._compute_grad_dim()
             log_loss = {k: torch.log(v + 1e-8) for k, v in loss.items()}
-            batch_grads = self._compute_grad(log_loss, mode="backward").to("cuda")
+            grads = self._compute_grad(log_loss, mode="backward").to("cuda")
             # [task_num, grad_dim]
 
-            self.grad_buffer = batch_grads + (beta / self.step**beta_sigma) * (
-                self.grad_buffer - batch_grads
-            )
+            self.grad_buffer = grads + (beta / self.step**beta_sigma) * (self.grad_buffer - grads)
 
             u_grad = self.grad_buffer.norm(dim=-1)
-            alpha = u_grad.max() / (u_grad + 1e-8)
-            new_grads = sum([alpha[i] * self.grad_buffer[i] for i in range(self.task_num)])
-            self._reset_grad(new_grads.to(torch.bfloat16))
+            alpha = u_grad.max() / (u_grad + 1e-8)  # record alpha for weight logging
+            self.new_grads = sum([alpha[i] * self.grad_buffer[i] for i in range(self.task_num)])
+            self._reset_grad(self.new_grads.to(torch.bfloat16))
 
         elif self.weighting == "PCGrad":
             batch_weight = np.ones(len(loss))
@@ -505,8 +531,10 @@ class ModelWrapperIman(L.LightningModule):
                     if g_ij < 0:
                         pc_grads[tn_i] -= g_ij * grads[tn_j] / (grads[tn_j].norm().pow(2) + 1e-8)
                         batch_weight[tn_j] -= (g_ij / (grads[tn_j].norm().pow(2) + 1e-8)).item()
-            new_grads = pc_grads.sum(0)
-            self._reset_grad(new_grads)
+            self.new_grads = pc_grads.sum(0)
+            self._reset_grad(self.new_grads)
+            # record alpha for weight logging
+            alpha = torch.Tensor(batch_weight)
 
         elif self.weighting == "CAGrad":
             calpha, rescale = 0.5, 1  # kwargs["calpha"], kwargs["rescale"]
@@ -545,7 +573,10 @@ class ModelWrapperIman(L.LightningModule):
                 new_grads = g / (1 + calpha)
             else:
                 raise ValueError(f"No support rescale type {rescale}")
+            self.new_grads = new_grads
             self._reset_grad(new_grads)
+            # record alpha for weight logging
+            alpha = ww
 
         elif self.weighting == "GradVac":
             beta = 0.5  # kwargs['GradVac_beta']
@@ -584,14 +615,20 @@ class ModelWrapperIman(L.LightningModule):
                                 )
                             )
                             pc_grads[tn_i, beg:end] += grads[tn_j, beg:end] * w
+                            batch_weight[tn_j] += w.item()
                         self.rho_T[tn_i, tn_j, k] = (1 - beta) * self.rho_T[
                             tn_i, tn_j, k
                         ] + beta * rho_ijk
-            new_grads = pc_grads.sum(0)
-            self._reset_grad(new_grads)
+            self.new_grads = pc_grads.sum(0)
+            self._reset_grad(self.new_grads)
             self.step += 1
+            # record alpha for weight logging
+            alpha = torch.Tensor(batch_weight)
         else:
             loss["loss"].backward()
+        if alpha.device == torch.device("cuda"):
+            alpha = alpha.cpu()
+        self.alpha = {task: alpha[tn] for tn, task in enumerate(self.task_name)}
 
     def test_step(self, batch):
         inputs, pad_masks, _ = batch
@@ -627,72 +664,61 @@ class ModelWrapperIman(L.LightningModule):
     def input_dims(self) -> dict[str, int]:
         return {k: len(v) for k, v in self.norm.variables.items()}
 
-    def get_share_params(self):
-        """Return the shared parameters of the model."""
-        return self.model.parameters()
-
-    def zero_grad_share_params(self):
-        """Set gradients of the shared parameters to zero."""
-        self.model.zero_grad(set_to_none=False)
-
     def _compute_grad_dim(self):
         self.grad_index = []
-        for param in self.get_share_params():
+        for param in self.model.parameters():
             self.grad_index.append(param.data.numel())
         self.grad_dim = sum(self.grad_index)
 
     def _grad2vec(self):
         grad = torch.zeros(self.grad_dim)
-        for count, param in enumerate(self.get_share_params()):
+        for count, param in enumerate(self.model.parameters()):
             if param.grad is not None:
                 beg = 0 if count == 0 else sum(self.grad_index[:count])
                 end = sum(self.grad_index[: (count + 1)])
                 grad[beg:end] = param.grad.data.view(-1)
         return grad
 
-    def _compute_grad(self, losses, mode, rep_grad=False):
+    def _combine_grads(self, grad):
+        for i, (g, param) in enumerate(zip(grad, self.model.parameters(), strict=False)):
+            if g is None:
+                grad[i] = torch.zeros_like(param)  # Replace None gradient with a tensor of zeros
+        return torch.cat([g.view(-1) for g in grad])
+
+    def _compute_grad(self, losses, mode):
         """mode: backward, autograd."""
-        if not rep_grad:
-            grads = torch.zeros(self.task_num, self.grad_dim)
-            for tn, task in enumerate(self.task_name):
-                if mode == "backward":
-                    losses[task].backward(retain_graph=True) if (
-                        tn + 1
-                    ) != self.task_num else losses[task].backward()
-                    grads[tn] = self._grad2vec()
-                elif mode == "autograd":
+        grads = torch.zeros(self.task_num, self.grad_dim)
+        for tn, task in enumerate(self.task_name):
+            if mode == "backward":
+                losses[task].backward(retain_graph=True) if (tn + 1) != self.task_num else losses[
+                    task
+                ].backward()
+                grads[tn] = self._grad2vec()
+            elif mode == "autograd":
+                grad = list(
+                    torch.autograd.grad(
+                        losses[task],
+                        self.model.parameters(),
+                        retain_graph=True,
+                        allow_unused=True,
+                    )
+                )
+                grads[tn] = self._combine_grads(grad)
+            elif mode == "no_grad":
+                with torch.no_grad():
                     grad = list(
                         torch.autograd.grad(
                             losses[task],
-                            self.get_share_params(),
+                            self.model.parameters(),
                             retain_graph=True,
                             allow_unused=True,
                         )
                     )
-
-                    # grad = [g if g is not None else torch.Tensor(0).to("cuda") for g in grad]
-                    for i, (g, param) in enumerate(
-                        zip(grad, self.get_share_params(), strict=False)
-                    ):
-                        if g is None:
-                            grad[i] = torch.zeros_like(
-                                param
-                            )  # Replace None gradient with a tensor of zeros
-                    grads[tn] = torch.cat([g.view(-1) for g in grad])
-                else:
-                    raise ValueError("No support {} mode for gradient computation")
-                self.zero_grad_share_params()
-        else:
-            if not isinstance(self.rep, dict):
-                grads = torch.zeros(self.task_num, *self.rep.size())
+                grads[tn] = self._combine_grads(grad)
             else:
-                grads = [torch.zeros(*self.rep[task].size()) for task in self.task_name]
-            for tn, task in enumerate(self.task_name):
-                if mode == "backward":
-                    losses[task].backward(retain_graph=True) if (
-                        tn + 1
-                    ) != self.task_num else losses[task].backward()
-                    grads[tn] = self.rep_tasks[task].grad.data.clone()
+                raise ValueError("No support {} mode for gradient computation")
+            if not self.automatic_optimization:
+                self.model.zero_grad(set_to_none=False)
         return grads
 
     def _get_grads(self, losses, mode="backward"):
@@ -706,23 +732,11 @@ class ModelWrapperIman(L.LightningModule):
         If ``rep_grad`` is ``False``, it returns the gradients of the shared parameters with size \
         of [task_num, -1], which means the gradient of each task is resized as a vector.
         """
-        if self.rep_grad:
-            per_grads = self._compute_grad(losses, mode, rep_grad=True)
-            if not isinstance(self.rep, dict):
-                grads = per_grads.reshape(self.task_num, self.rep.size()[0], -1).sum(1)
-            else:
-                try:
-                    grads = torch.stack(per_grads).sum(1).view(self.task_num, -1)
-                except:  # noqa: E722
-                    raise ValueError(
-                        "The representation dimensions of different tasks must be consistent"
-                    ) from None
-            return [per_grads, grads]
         self._compute_grad_dim()
         return self._compute_grad(losses, mode)
 
     def _reset_grad(self, new_grads):
-        for count, param in enumerate(self.get_share_params()):
+        for count, param in enumerate(self.model.parameters()):
             if param.grad is not None:
                 beg = 0 if count == 0 else sum(self.grad_index[:count])
                 end = sum(self.grad_index[: (count + 1)])
@@ -730,7 +744,7 @@ class ModelWrapperIman(L.LightningModule):
                     new_grads[beg:end].contiguous().view(param.data.size()).data.clone()
                 )
 
-    def _backward_new_grads(self, batch_weight, per_grads=None, grads=None):
+    def _backward_new_grads(self, batch_weight, grads=None):
         r"""Reset the gradients and make a backward.
 
         Args:
@@ -738,32 +752,8 @@ class ModelWrapperIman(L.LightningModule):
             per_grad (torch.Tensor): needed if ``rep_grad`` True. gradients of the representations.
             grads (torch.Tensor): needed if ``rep_grad`` False. gradients of the shared parameters.
         """
-        if self.rep_grad:
-            if not isinstance(self.rep, dict):
-                # transformed_grad = torch.einsum('i, i... -> ...', batch_weight, per_grads)
-                transformed_grad = sum([
-                    batch_weight[i] * per_grads[i] for i in range(self.task_num)
-                ])
-                self.rep.backward(transformed_grad)
-            else:
-                for tn, task in enumerate(self.task_name):
-                    rg = (tn + 1) != self.task_num
-                    self.rep[task].backward(batch_weight[tn] * per_grads[tn], retain_graph=rg)
-        else:
-            # new_grads = torch.einsum('i, i... -> ...', batch_weight, grads)
-            new_grads = sum([batch_weight[i] * grads[i] for i in range(self.task_num)])
-            self._reset_grad(new_grads)
-
-    def _prepare_rep(self, rep, task, same_rep=None):
-        if self.rep_grad:
-            if not same_rep:
-                self.rep[task] = rep
-            else:
-                self.rep = rep
-            self.rep_tasks[task] = rep.detach().clone()
-            self.rep_tasks[task].requires_grad = True
-            return self.rep_tasks[task]
-        return rep
+        self.new_grads = sum([batch_weight[i] * grads[i] for i in range(self.task_num)])
+        self._reset_grad(self.new_grads)
 
     # IMTL ####
     def _stop_criteria(self, gtg, alpha_t):
@@ -837,3 +827,18 @@ class ModelWrapperIman(L.LightningModule):
         else:
             raise ValueError
         self.rho_T = torch.zeros(self.task_num, self.task_num, len(self.k_idx)).to("cuda")
+
+    def _get_grad_cos_sim(self, grad1, grad2):
+        """Computes cosine similarity of gradients after flattening of tensors."""
+        cosine = self.cos_sim(grad1, grad2)
+        return torch.clamp(cosine, -1, 1)
+
+    def compute_pairwise_cossim(self, grads):
+        self.cos_sims = []
+        self.task_pairs = []
+
+        for i, task_a in enumerate(self.task_name):
+            for j, task_b in enumerate(self.task_name[i + 1 :]):
+                cos_sim = self._get_grad_cos_sim(grads[i], grads[j])
+                self.cos_sims.append(cos_sim.item())
+                self.task_pairs.append((task_a, task_b))

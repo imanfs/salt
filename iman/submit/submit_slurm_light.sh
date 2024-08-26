@@ -4,7 +4,7 @@
 #SBATCH --job-name=salt
 
 # choose the GPU queue
-#SBATCH -p GPU
+#SBATCH -p LIGHTGPU
 
 # requesting one node
 #SBATCH --nodes=1
@@ -17,18 +17,12 @@
 # (remove the "v100:" if you don't care what GPU)
 #SBATCH --gres=gpu:a100:1
 
-# note! this needs to match --trainer.devices!
-#SBATCH --ntasks-per-node=1
-
 # number of cpus per task
 # don't use this if you have exclusive access to the node
-# SBATCH --cpus-per-task=16
-
-# time
-#SBATCH --time=31:00:00
+#SBATCH --cpus-per-task=10
 
 # request enough memory
-#SBATCH --mem=80G
+#SBATCH --mem=40G
 
 # Change log names; %j gives job id, %x gives job name
 #SBATCH --output=/home/xucabis2/salt/iman/submit/logs/slurm-%j.%x.out
@@ -43,8 +37,8 @@ echo "Running on " $node
 
 if [ "$node" == "compute-gpu-0-0.local" ]; then
     echo "Running on light GPU"
-    source /home/xzcappon/.bashscripts/get_free_mig.bash
-
+    source /home/xzcapwsl/GroupProject/utils/submit/light_setup.sh
+    echo $CUDA_VISIBLE_DEVICES
     # Check if a GPU was available
     if [ "$GPU_AVAILABLE" -eq 0 ]; then
         echo "No GPU is available, exiting."

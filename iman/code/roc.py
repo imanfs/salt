@@ -7,7 +7,9 @@ from puma import Roc, RocPlot
 from puma.metrics import calc_rej
 
 
-def extract_MF_name(path):
+def extract_MF_name(path, mf_only=False):
+    if mf_only:
+        return "salt"
     prefix = "MaskFormer_"
     suffix = "_"
     return path.partition(prefix)[2].partition(suffix)[0]
@@ -20,16 +22,16 @@ def disc_fct(arr: np.ndarray, f_c: float = 0.018) -> np.ndarray:
 
 
 def apply_discs(df, name):
-    label = "GN2v00" if "GN2" in name else f"MaskFormer_{name}"
+    label = "GN2v00_" if "GN2" in name else f"MaskFormer_{name}"
     return np.apply_along_axis(
         disc_fct,
         1,
-        df[[f"{label}_pu", f"{label}_pc", f"{label}_pb"]].values,
+        df[[f"{label}pu", f"{label}pc", f"{label}pb"]].values,
     )
 
 
-def plt_roc(RocPlot, sig_eff, bkg_rej, n_test, rej_class, name):
-    label = "GN2" if "GN2" in name else f"MaskFormer ({name})"
+def plt_roc(RocPlot, sig_eff, bkg_rej, n_test, rej_class, name, tags="", ref=None):
+    label = "GN2" if "GN2" in name else f"MF-{name} " + tags
 
     RocPlot.add_roc(
         Roc(
@@ -40,7 +42,8 @@ def plt_roc(RocPlot, sig_eff, bkg_rej, n_test, rej_class, name):
             signal_class="bjets",
             label=label,
         ),
-        reference=name == "GN2",
+        reference=ref if ref is not None else name == "GN2",
+        # reference=name == "MaskFormer (default)",
     )
 
 
@@ -48,6 +51,18 @@ fname_default = (
     "/home/xucabis2/salt/logs/_old/_pre-b-hadron-weighting/_baselines/"
     "MaskFormer_default_20240724-T112538/ckpts/epoch=019-val_loss=0.65355__test_ttbar.h5"
 )
+fname_reweighting = (
+    "/home/xucabis2/salt/logs/MaskFormer_default_20240811-T102933/"
+    "ckpts/epoch=019-val_loss=0.65148__test_ttbar.h5"
+)
+
+fname_no_reweighting = "/home/xucabis2/salt/logs/MaskFormer_default_20240809-T192637/ckpts/epoch=019-val_loss=0.65128__test_ttbar.h5"
+
+fname_original = "/home/xucabis2/salt/salt/logs/MaskFormer_20240823-T210026/ckpts/epoch=019-val_loss=0.64836__test_ttbar.h5"
+
+fname_reweighting2 = "/home/xucabis2/salt/logs/MaskFormer_default_20240823-T201109/ckpts/epoch=019-val_loss=0.65402__test_ttbar.h5"
+
+fname_original_rw = "/home/xucabis2/salt/logs/MaskFormer_upweighted_20240824-T133252/ckpts/epoch=019-val_loss=0.64815__test_ttbar.h5"
 
 fname_gls = (
     "/home/xucabis2/salt/logs/MaskFormer_GLS_20240801-T195836/"
@@ -84,7 +99,13 @@ fname_pcgrad = (
     "ckpts/epoch=019-val_loss=0.64397__test_ttbar.h5"
 )
 
-fnames_preds = [fname_default, fname_aligned, fname_cagrad, fname_pcgrad]
+fnames_preds = {
+    fname_no_reweighting: "09-08 w/o reweighting",
+    fname_reweighting: "11-08 w/ reweighting",
+    fname_original: "22-08",
+    # fname_reweighting2: "23-08 w/ reweighting",
+    fname_original_rw: "24-08",
+}
 
 # fnames_preds = [fname_gls, fname_dwa]
 
@@ -115,11 +136,11 @@ is_b = df["flavour_label"] == 0
 n_jets_light = sum(is_light)
 n_jets_c = sum(is_c)
 
-discs_gn2 = apply_discs(df, "GN2")
-gn2_ujets_rej = calc_rej(discs_gn2[is_b], discs_gn2[is_light], sig_eff)
-gn2_cjets_rej = calc_rej(discs_gn2[is_b], discs_gn2[is_c], sig_eff)
+# discs_gn2 = apply_discs(df, "GN2")
+# gn2_ujets_rej = calc_rej(discs_gn2[is_b], discs_gn2[is_light], sig_eff)
+# gn2_cjets_rej = calc_rej(discs_gn2[is_b], discs_gn2[is_c], sig_eff)
 
-discs_mf = apply_discs(df, "default")
+discs_mf = apply_discs(df, "default_")
 mf_ujets_rej = calc_rej(discs_mf[is_b], discs_mf[is_light], sig_eff)
 mf_cjets_rej = calc_rej(discs_mf[is_b], discs_mf[is_c], sig_eff)
 
@@ -133,16 +154,18 @@ plot_roc = RocPlot(
     y_scale=1.4,
 )
 
-plt_roc(plot_roc, sig_eff, gn2_ujets_rej, n_jets_light, "ujets", "GN2")
-plt_roc(plot_roc, sig_eff, gn2_cjets_rej, n_jets_c, "cjets", "GN2")
+# plt_roc(plot_roc, sig_eff, gn2_ujets_rej, n_jets_light, "ujets", "GN2")
+# plt_roc(plot_roc, sig_eff, gn2_cjets_rej, n_jets_c, "cjets", "GN2")
 
-plt_roc(plot_roc, sig_eff, mf_ujets_rej, n_jets_light, "ujets", "default")
-plt_roc(plot_roc, sig_eff, mf_cjets_rej, n_jets_c, "cjets", "default")
+plt_roc(plot_roc, sig_eff, mf_ujets_rej, n_jets_light, "ujets", "default", "(24-07)", ref=True)
+plt_roc(plot_roc, sig_eff, mf_cjets_rej, n_jets_c, "cjets", "default", "(24-07)", ref=True)
 
 for fname in fnames_preds:
-    mf_name = extract_MF_name(fname)
-    tag = mf_name
-    mf_name = "default" if fname == fname_gls else mf_name
+    mf_name = extract_MF_name(fname, fname == fname_original)
+    name = mf_name
+    mf_name = "default_" if fname == fname_gls else mf_name + "_"
+    print("ok")
+    mf_name = "" if fname == fname_original else mf_name
     reader = H5Reader(fname, batch_size=1_000)
     df = pd.DataFrame(
         reader.load(
@@ -151,9 +174,9 @@ for fname in fnames_preds:
                     "pt",
                     "eta",
                     "flavour_label",
-                    f"MaskFormer_{mf_name}_pb",
-                    f"MaskFormer_{mf_name}_pc",
-                    f"MaskFormer_{mf_name}_pu",
+                    f"MaskFormer_{mf_name}pb",
+                    f"MaskFormer_{mf_name}pc",
+                    f"MaskFormer_{mf_name}pu",
                 ]
             },
             num_jets=500_000,
@@ -164,14 +187,16 @@ for fname in fnames_preds:
     cjets_rej = calc_rej(discs[is_b], discs[is_c], sig_eff)
 
     # MF comparison plots
-    plt_roc(plot_roc, sig_eff, ujets_rej, n_jets_light, "ujets", tag)
-    plt_roc(plot_roc, sig_eff, cjets_rej, n_jets_c, "cjets", tag)
+    plt_roc(
+        plot_roc, sig_eff, ujets_rej, n_jets_light, "ujets", name, tags=f"({fnames_preds[fname]})"
+    )
+    plt_roc(plot_roc, sig_eff, cjets_rej, n_jets_c, "cjets", name, tags=f"({fnames_preds[fname]})")
 
 timestamp = datetime.now().strftime("%m%d")
 plot_dir = "/home/xucabis2/salt/iman/plots/roc"
 plot_roc.set_ratio_class(1, "ujets")
 plot_roc.set_ratio_class(2, "cjets")
 plot_roc.draw()
-plot_name = f"{plot_dir}/roc1_{mf_name}_{timestamp}.png"
+plot_name = f"{plot_dir}/roc_no_ref_{mf_name}_{timestamp}.png"
 print("Saving to ", plot_name)
 plot_roc.savefig(plot_name, transparent=False)

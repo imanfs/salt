@@ -159,12 +159,26 @@ class MaskFormerLoss(nn.Module):
         # process full inidices
         flav_pred_logits = preds["class_logits"].flatten(0, 1)
         flavour_labels = labels["object_class"].flatten(0, 1)
+
+        # upweight b-hadrons
+        weights = torch.ones(len(flavour_labels), device=flavour_labels.device)
+        weights[labels["flavour"].flatten(0, 1) == 5] = 4.0  # upweight b-hadrons
+
         if flav_pred_logits.shape[1] == 1:
             loss = F.binary_cross_entropy_with_logits(
-                flav_pred_logits.squeeze(), flavour_labels.float(), pos_weight=self.empty_weight
+                flav_pred_logits.squeeze(),
+                flavour_labels.float(),
+                pos_weight=self.empty_weight,
+                reduction="none",
             )
+            loss *= weights
+            loss = loss.mean()
         else:
-            loss = F.cross_entropy(flav_pred_logits, flavour_labels, self.empty_weight)
+            loss = F.cross_entropy(
+                flav_pred_logits, flavour_labels, self.empty_weight, reduction="none"
+            )
+            loss *= weights
+            loss = loss.mean()
         return {"object_class_ce": loss}
 
     def loss_masks(self, preds, labels):
