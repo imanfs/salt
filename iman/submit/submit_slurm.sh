@@ -25,7 +25,7 @@
 # SBATCH --cpus-per-task=16
 
 # time
-#SBATCH --time=31:00:00
+#SBATCH --time=35:00:00
 
 # request enough memory
 #SBATCH --mem=80G
@@ -79,4 +79,4 @@ echo "Running training script..."
 salt fit \
     --config ~/salt/salt/configs/MaskFormer_base.yaml \
     -c /home/xucabis2/salt/salt/configs/weighting_AlignedMTL.yaml \
-    --trainer.precision bf16-true  --force
+    --trainer.precision bf16-true --force

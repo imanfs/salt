@@ -26,7 +26,7 @@ def check_unique(modules: nn.ModuleList, attr_name: str) -> None:
     ), f"Attribute '{attr_name}' must be unique for class {modules[0].__class__.__name__}"
 
 
-class ModelWrapperIman(L.LightningModule):
+class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
     def __init__(
         self,
         model: nn.Module,
@@ -108,6 +108,7 @@ class ModelWrapperIman(L.LightningModule):
         self.loss_weights = self.model.mask_decoder.mask_loss.loss_weights
         self.task_num = len(self.loss_weights)
         self.task_name = list(self.loss_weights.keys())
+        self.calc_cos_sim = True
         self.init_param()
         self.rep_grad = False
         self.cos_sim = nn.CosineSimilarity(dim=0)
@@ -158,10 +159,10 @@ class ModelWrapperIman(L.LightningModule):
     def on_fit_start(self):
         if not self.automatic_optimization:
             [self.opt], [self.sch] = self.configure_optimizers()  # Access the optimizer
-            #  IMTL has torch.linalg.inv operations which needs 32bit or bfloat16 precision
             assert (
                 self.trainer.precision != "16-mixed"
             ), f"{self.weighting} requires 32-bit or bfloat16 precision for manual optimization. "
+            self.calc_cos_sim = True
         if self.weighting == "DWA":
             self.train_loss_buffer = torch.zeros([6, self.trainer.max_epochs])
 
@@ -227,10 +228,6 @@ class ModelWrapperIman(L.LightningModule):
             }
 
         elif self.weighting == "IMTL":
-            losses = {
-                key: self.loss_scale[i].exp() * value - self.loss_scale[i]
-                for i, (key, value) in enumerate(losses.items())
-            }
             self.loss_weights = {k: self.loss_scale[i].exp() for i, k in enumerate(self.task_name)}
         return losses
 
@@ -327,6 +324,14 @@ class ModelWrapperIman(L.LightningModule):
             n = f"cos_sim_{task_a}_{task_b}"
             self.log(n, cos_sim, **kwargs)
 
+    def log_grads(self, grads):
+        kwargs = {"sync_dist": len(self.trainer.device_ids) > 1}
+        if not isinstance(grads, dict):
+            grads = {task: grads[tn] for tn, task in enumerate(self.task_name)}
+        for t, grad in grads.items():
+            n = f"{t}_weights"
+            self.log(n, grad.sum(), **kwargs)
+
     def training_step(self, batch):
         # forward pass
         preds, labels, pad_masks, loss = self.shared_step(batch)
@@ -334,7 +339,6 @@ class ModelWrapperIman(L.LightningModule):
         log_loss = loss.copy()
         log_loss = self.total_loss(log_loss)
         self.log_losses(log_loss, stage="train")
-
         # weight and combine losses
         loss = self.total_loss(self.weight_loss(loss))
         if loss["loss"].isnan():
@@ -352,7 +356,9 @@ class ModelWrapperIman(L.LightningModule):
 
         if self.automatic_optimization:
             self.log_weights(self.loss_weights, stage="train")
-            self.new_grads = self._compute_grad(loss, mode="no_grad")  # for cossim calculation
+            if self.calc_cos_sim:
+                self.new_grads = self._compute_grad(loss, mode="no_grad")  # for cossim calculation
+                self.log_grads(self.new_grads)
 
         else:
             opt = self.optimizers()
@@ -361,9 +367,11 @@ class ModelWrapperIman(L.LightningModule):
             opt.step()  # Update model parameters
             self.lr_schedulers().step()
             self.log_weights(self.alpha, stage="train")
+            self.log_grads(self.new_grads)
 
-        self.compute_pairwise_cossim(self.new_grads)
-        self.log_cossim(self.task_pairs, self.cos_sims)
+        if self.calc_cos_sim:
+            self.compute_pairwise_cossim(self.new_grads)
+            self.log_cossim(self.task_pairs, self.cos_sims)
         return {**loss, "outputs": outputs}
 
     def validation_step(self, batch):
@@ -388,6 +396,10 @@ class ModelWrapperIman(L.LightningModule):
 
     def manual_backward(self, loss):
         if self.weighting == "IMTL":
+            loss = {
+                task: self.loss_scale[tn].exp() * loss[task] - self.loss_scale[tn]
+                for tn, task in enumerate(self.task_name)
+            }
             grads = self._get_grads(loss, mode="backward").to("cuda")
             grads_unit = grads / torch.norm(grads + 1e-8, p=2, dim=-1, keepdim=True)
 
@@ -410,17 +422,10 @@ class ModelWrapperIman(L.LightningModule):
                     torch.matmul(grads[0], U.t()), torch.linalg.inv(torch.matmul(D, U.t()))
                 )
             alpha = torch.cat((1 - alpha.sum().unsqueeze(0), alpha), dim=0)
-            if self.rep_grad:
-                # self._backward_new_grads(alpha, per_grads=per_grads)
-                pass
-            else:
-                self._backward_new_grads(alpha, grads=grads)
+            self._backward_new_grads(alpha, grads=grads)
 
         elif self.weighting == "Aligned_MTL":
             grads = self._get_grads(loss, mode="backward").to("cuda")
-
-            if self.rep_grad:
-                per_grads, grads = grads[0], grads[1]
 
             M = torch.matmul(grads, grads.t())  # [num_tasks, num_tasks]
             lmbda, V = torch.linalg.eigh(M.to(torch.float32))  # , UPLO="U" if upper else "L")
@@ -434,10 +439,7 @@ class ModelWrapperIman(L.LightningModule):
             B = lmbda[-1].sqrt() * ((V @ sigma) @ V.t())
             alpha = B.sum(0).to(grads.dtype)
 
-            if self.rep_grad:
-                self._backward_new_grads(alpha, per_grads=per_grads)
-            else:
-                self._backward_new_grads(alpha, grads=grads)
+            self._backward_new_grads(alpha, grads=grads)
 
         elif self.weighting == "Nash_MTL":
             self.update_weights_every = 1
@@ -498,7 +500,7 @@ class ModelWrapperIman(L.LightningModule):
                 -1,
             )
             self.new_grads = self.y.t() @ self.lambd
-            self._reset_grad(self.new_grads.to(torch.bfloat16))
+            self._reset_grad(self.new_grads.to(grads.dtype))
             # record alpha for weight logging
             alpha = self.lambd
 
@@ -516,8 +518,8 @@ class ModelWrapperIman(L.LightningModule):
 
             u_grad = self.grad_buffer.norm(dim=-1)
             alpha = u_grad.max() / (u_grad + 1e-8)  # record alpha for weight logging
-            self.new_grads = sum([alpha[i] * self.grad_buffer[i] for i in range(self.task_num)])
-            self._reset_grad(self.new_grads.to(torch.bfloat16))
+            self.new_grads = [alpha[i] * self.grad_buffer[i] for i in range(self.task_num)]
+            self._reset_grad(sum(self.new_grads).to(grads.dtype))
 
         elif self.weighting == "PCGrad":
             batch_weight = np.ones(len(loss))
@@ -752,8 +754,8 @@ class ModelWrapperIman(L.LightningModule):
             per_grad (torch.Tensor): needed if ``rep_grad`` True. gradients of the representations.
             grads (torch.Tensor): needed if ``rep_grad`` False. gradients of the shared parameters.
         """
-        self.new_grads = sum([batch_weight[i] * grads[i] for i in range(self.task_num)])
-        self._reset_grad(self.new_grads)
+        self.new_grads = [batch_weight[i] * grads[i] for i in range(self.task_num)]
+        self._reset_grad(sum(self.new_grads))
 
     # IMTL ####
     def _stop_criteria(self, gtg, alpha_t):
@@ -842,3 +844,4 @@ class ModelWrapperIman(L.LightningModule):
                 cos_sim = self._get_grad_cos_sim(grads[i], grads[j])
                 self.cos_sims.append(cos_sim.item())
                 self.task_pairs.append((task_a, task_b))
+        # print(self.cos_sims, self.task_pairs)
