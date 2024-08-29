@@ -329,8 +329,11 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
         if not isinstance(grads, dict):
             grads = {task: grads[tn] for tn, task in enumerate(self.task_name)}
         for t, grad in grads.items():
-            n = f"{t}_weights"
-            self.log(n, grad.sum(), **kwargs)
+            n = f"{t}_grad"
+            L1_norm = torch.norm(grad, p=1)
+            L2_norm = torch.norm(grad, p=2)
+            self.log(n + "_L1", L1_norm, **kwargs)
+            self.log(n + "_L2", L2_norm, **kwargs)
 
     def training_step(self, batch):
         # forward pass
@@ -628,8 +631,7 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
             alpha = torch.Tensor(batch_weight)
         else:
             loss["loss"].backward()
-        if alpha.device == torch.device("cuda"):
-            alpha = alpha.cpu()
+        alpha = alpha.cpu() if alpha.device == torch.device("cuda") else alpha
         self.alpha = {task: alpha[tn] for tn, task in enumerate(self.task_name)}
 
     def test_step(self, batch):
@@ -839,9 +841,8 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
         self.cos_sims = []
         self.task_pairs = []
 
-        for i, task_a in enumerate(self.task_name):
-            for j, task_b in enumerate(self.task_name[i + 1 :]):
-                cos_sim = self._get_grad_cos_sim(grads[i], grads[j])
+        for a, task_a in enumerate(self.task_name):
+            for b, task_b in enumerate(self.task_name[a + 1 :], start=a + 1):
+                cos_sim = self._get_grad_cos_sim(grads[a], grads[b])
                 self.cos_sims.append(cos_sim.item())
                 self.task_pairs.append((task_a, task_b))
-        # print(self.cos_sims, self.task_pairs)

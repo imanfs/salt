@@ -30,10 +30,30 @@ from salt.models.transformer import (
     TransformerEncoderLayer,
 )
 from salt.models.transformer_v2 import TransformerV2
+from salt.models.weighting import (
+    DWA,
+    IMTL,
+    RLW,
+    UW,
+    AlignedMTL,
+    CAGrad,
+    GradVac,
+    MoCo,
+    NashMTL,
+    PCGrad,
+    Static,
+)
 
 # from salt.models.maskformer import MaskFormer
 
 __all__ = [
+    "DWA",
+    "GLS",
+    "IMTL",
+    "RLW",
+    "UW",
+    "AlignedMTL",
+    "CAGrad",
     "ClassificationTask",
     "Dense",
     "DictCrossAttentionPooling",
@@ -41,13 +61,18 @@ __all__ = [
     "GATv2Attention",
     "GaussianRegressionTask",
     "GlobalAttentionPooling",
+    "GradVac",
+    "Gradients",
     "InitNet",
     "InputNorm",
     "MaskFormer",
     "MaskFormerLoss",
     "MaskFormerLossIman",
+    "MoCo",
     "MultiheadAttention",
+    "NashMTL",
     "NodeQueryGAP",
+    "PCGrad",
     "Pooling",
     "PositionalEncoder",
     "R21Xbb",
@@ -56,6 +81,7 @@ __all__ = [
     "SaltModel",
     "SaltModelIman",
     "ScaledDotProductAttention",
+    "Static",
     "TaskBase",
     "TensorCrossAttentionPooling",
     "Transformer",
