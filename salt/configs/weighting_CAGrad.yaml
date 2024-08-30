@@ -1,6 +1,8 @@
 name: MaskFormer_CAGrad
 
 model:
+  loss_weighting:
+    class_path: salt.models.CAGrad
   model:
     init_args:
       mask_decoder:

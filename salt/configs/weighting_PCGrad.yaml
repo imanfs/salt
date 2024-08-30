@@ -1,6 +1,8 @@
 name: MaskFormer_PCGrad
 
 model:
+  loss_weighting:
+    class_path: salt.models.PCGrad
   model:
     init_args:
       mask_decoder:

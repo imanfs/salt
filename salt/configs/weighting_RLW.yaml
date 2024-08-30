@@ -1,6 +1,8 @@
 name: MaskFormer_RLW
 
 model:
+  loss_weighting:
+    class_path: salt.models.RLW
   model:
     init_args:
       mask_decoder:

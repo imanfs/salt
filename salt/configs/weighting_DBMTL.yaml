@@ -1,6 +1,8 @@
 name: MaskFormer_DBMTL
 
 model:
+  loss_weighting:
+    class_path: salt.models.DBMTL
   model:
     init_args:
       mask_decoder:

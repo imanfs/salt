@@ -32,6 +32,7 @@ class Weighting:
         self.task_num = len(self.task_names)
         self.auto_opt = auto_opt
         self.name = self.__class__.__name__
+        print(f"Model is being trained with {self.name} weighting.")
 
     def set_model(self, model):
         self.model = model
@@ -151,6 +152,7 @@ class Weighting:
         """
         self.new_grads = [batch_weight[i] * grads[i] for i in range(self.task_num)]
         self._reset_grad(sum(self.new_grads))
+        self.new_grads = torch.stack(self.new_grads)
 
     def _get_grad_cos_sim(self, grad1, grad2):
         """Computes cosine similarity of gradients after flattening of tensors."""
@@ -170,17 +172,29 @@ class Weighting:
 
 
 class Static(Weighting):
+    """Manual weighting which can be modified by the user using the config file."""
+
     def __init__(self, task_names=None, loss_weights: dict | None = None):
         super().__init__(task_names=task_names, auto_opt=True)
         self.loss_weights = (
             loss_weights if loss_weights is not None else dict.fromkeys(task_names, 1.0)
         )
+        print("Weights are: ", self.loss_weights)
 
     def weight_loss(self, losses: dict) -> dict:
         return {k: v * self.loss_weights[k] for k, v in losses.items()}
 
 
 class RLW(Weighting):
+    """Random Loss Weighting (RLW).
+
+    Proposed in
+    `Reasonable Effectiveness of Random Weighting: Litmus Test for Multi-Task Learning (TMLR 2022):
+      <https://openreview.net/forum?id=jjtFD8A1Wx>`_ \
+    and implemented by us.
+
+    """
+
     def __init__(self, task_names=None):
         super().__init__(task_names=task_names, auto_opt=True)
 
@@ -190,6 +204,18 @@ class RLW(Weighting):
 
 
 class DWA(Weighting):
+    """Dynamic Weight Average (DWA).
+
+    This method is proposed in `End-To-End Multi-Task Learning With Attention (CVPR 2019):
+      <https://arxiv.org/abs/1803.10704>`_ \
+    and implemented by modifying from the `official PyTorch implementation:
+      <https://github.com/lorenmt/mtan>`_.
+
+    Args:
+        T (float, default=2.0): The softmax temperature.
+
+    """
+
     def __init__(self, task_names=None):
         super().__init__(task_names=task_names, auto_opt=True)
         self.avg_losses = {}
@@ -228,6 +254,14 @@ class DWA(Weighting):
 
 
 class UW(Weighting):
+    """Uncertainty Weights (UW).
+
+    This method is proposed in
+    `MTL Using Uncertainty to Weigh Losses for Scene Geometry & Semantics (CVPR 2018):
+      <https://arxiv.org/abs/1705.07115>`_ \
+    and implemented by us.
+    """
+
     def __init__(self, task_names=None):
         super().__init__(task_names=task_names, auto_opt=True)
         self.loss_scale = torch.nn.Parameter(torch.tensor([-0.5] * self.task_num))
@@ -243,6 +277,14 @@ class UW(Weighting):
 
 
 class IMTL(Weighting):
+    """Impartial Multi-task Learning (IMTL).
+
+    This method is proposed in `Towards Impartial Multi-task Learning (ICLR 2021):
+      <https://openreview.net/forum?id=IMPnRXEWpvr>`_ \
+    and implemented by us.
+
+    """
+
     def __init__(self, task_names=None):
         super().__init__(task_names=task_names, auto_opt=False)
         self.loss_scale = nn.Parameter(torch.tensor([0.0] * self.task_num))
@@ -282,6 +324,15 @@ class IMTL(Weighting):
 
 
 class AlignedMTL(Weighting):
+    """Aligned-MTL.
+
+    This method is proposed in `Independent Component Alignment for Multi-Task Learning (CVPR 2023):
+      <https://arxiv.org/abs/2305.19000>
+    and implemented by modifying from the official PyTorch implementation in:
+      <https://github.com/SamsungLabs/MTL>.
+
+    """
+
     def __init__(self, task_names=None):
         super().__init__(task_names=task_names, auto_opt=False)
 
@@ -301,12 +352,26 @@ class AlignedMTL(Weighting):
         alpha = B.sum(0).to(grads.dtype)
 
         self._backward_new_grads(alpha, grads=grads)
+        print(self.new_grads.shape)
         # record alpha for weight logging
         alpha = alpha.cpu() if alpha.device == torch.device("cuda") else alpha
         self.alpha = {task: alpha[tn] for tn, task in enumerate(self.task_names)}
 
 
 class NashMTL(Weighting):
+    """Nash-MTL.
+
+    This method is proposed in `Multi-Task Learning as a Bargaining Game (ICML 2022):
+      <https://proceedings.mlr.press/v162/navon22a/navon22a.pdf>`_ \
+    and implemented by modifying from the `official PyTorch implementation:
+      <https://github.com/AvivNavon/nash-mtl>`_.
+
+    Args:
+        update_weights_every (int, default=1): Period of weights update.
+        optim_niter (int, default=20): The max iteration of optimization solver.
+        max_norm (float, default=1.0): The max norm of the gradients.
+    """
+
     def __init__(self, task_names=None, update_weights_every=1, optim_niter=20, max_norm=1.0):
         super().__init__(task_names=task_names, auto_opt=False)
         self.update_weights_every = update_weights_every
@@ -410,6 +475,21 @@ class NashMTL(Weighting):
 
 
 class MoCo(Weighting):
+    """MoCo.
+
+    This method is proposed in
+    `Mitigating Gradient Bias in Multi-objective Learning: Provably Convergent Approach (ICLR 2023):
+      <https://openreview.net/forum?id=dLAYGdKTi2>`_ \
+    and implemented based on the author sharing code (Heshan Fernando: fernah@rpi.edu).
+
+    Args:
+        MoCo_beta (float, default=0.5): The learning rate of y.
+        MoCo_beta_sigma (float, default=0.5): The decay rate of MoCo_beta.
+        MoCo_gamma (float, default=0.1): The learning rate of lambd.
+        MoCo_gamma_sigma (float, default=0.5): The decay rate of MoCo_gamma.
+        MoCo_rho (float, default=0): The L2 regularization parameter of lambda's update.
+    """
+
     def __init__(
         self,
         task_names=None,
@@ -457,6 +537,9 @@ class DBMTL(Weighting):
         super().__init__(task_names=task_names, auto_opt=False)
         self.beta, self.beta_sigma = DB_beta, DB_beta_sigma
         self.step = 0
+
+    def set_model(self, model):
+        super().set_model(model)
         self._compute_grad_dim()
         self.grad_buffer = torch.zeros(self.task_num, self.grad_dim).to("cuda")
 
@@ -481,6 +564,13 @@ class DBMTL(Weighting):
 
 
 class PCGrad(Weighting):
+    """Project Conflicting Gradients (PCGrad).
+
+    This method is proposed in `Gradient Surgery for Multi-Task Learning (NeurIPS 2020):
+      <https://papers.nips.cc/paper/2020/hash/3fe78a8acf5fda99de95303940a2420c-Abstract.html>`_ \
+    and implemented by us.
+    """
+
     def __init__(self, task_names=None):
         super().__init__(task_names=task_names, auto_opt=False)
 
@@ -489,20 +579,34 @@ class PCGrad(Weighting):
         grads = self.compute_grad(losses, mode="backward").to("cuda")  # [task_num, grad_dim]
         pc_grads = grads.clone()
         for tn_i in range(self.task_num):
-            task_index = torch.randperm(self.task_num, device="cuda")
+            # task_index = torch.randperm(self.task_num, device="cuda")
+            task_index = list(range(self.task_num))
+            random.shuffle(task_index)
             for tn_j in task_index:
                 g_ij = torch.dot(pc_grads[tn_i], grads[tn_j])
                 if g_ij < 0:
                     pc_grads[tn_i] -= g_ij * grads[tn_j] / (grads[tn_j].norm().pow(2) + 1e-8)
                     batch_weight[tn_j] -= (g_ij / (grads[tn_j].norm().pow(2) + 1e-8)).item()
-        self.new_grads = pc_grads.sum(0)
-        self._reset_grad(self.new_grads)
+        self.new_grads = pc_grads
+        self._reset_grad(self.new_grads.sum(0))
         # record alpha for weight logging
         alpha = torch.Tensor(batch_weight).cpu()
         self.alpha = {task: alpha[tn] for tn, task in enumerate(self.task_names)}
 
 
 class CAGrad(Weighting):
+    """Conflict-Averse Gradient descent (CAGrad).
+
+    Proposed in `Conflict-Averse Gradient Descent for Multi-task learning (NeurIPS 2021):
+      <https://openreview.net/forum?id=_61Qh8tULj_>`
+    and implemented by modifying from the `official PyTorch implementation:
+      <https://github.com/Cranial-XIX/CAGrad>`_.
+
+    Args:
+        calpha (float, default=0.5): A hyperparameter that controls the convergence rate.
+        rescale ({0, 1, 2}, default=1): The type of the gradient rescaling.
+    """
+
     def __init__(self, task_names=None, calpha=0.5, rescale=1):
         super().__init__(task_names=task_names, auto_opt=False)
 
@@ -551,6 +655,20 @@ class CAGrad(Weighting):
 
 
 class GradVac(Weighting):
+    """Gradient Vaccine (GradVac).
+
+    Proposed in `Gradient Vaccine: Investigating and Improving Multi-task Optimization
+    in Massively Multilingual Models (ICLR 2021 Spotlight):
+      <https://openreview.net/forum?id=F1vEjWK-lH_>`_ \
+    and implemented by us.
+
+    Args:
+        GradVac_beta (float, default=0.5):
+            The exponential moving average (EMA) decay parameter.
+        GradVac_group_type (int, default=0):
+            Parameter granularity (0: whole_model; 1: all_layer; 2: all_matrix).
+    """
+
     def __init__(self, task_names=None, GradVac_beta=0.5, GradVac_group_type=0):
         super().__init__(task_names=task_names, auto_opt=False)
         self.beta = GradVac_beta
@@ -596,8 +714,8 @@ class GradVac(Weighting):
                     self.rho_T[tn_i, tn_j, k] = (1 - self.beta) * self.rho_T[
                         tn_i, tn_j, k
                     ] + self.beta * rho_ijk
-        self.new_grads = pc_grads.sum(0)
-        self._reset_grad(self.new_grads)
+        self.new_grads = pc_grads
+        self._reset_grad(self.new_grads.sum(0))
         self.step += 1
         # record alpha for weight logging
         alpha = torch.Tensor(batch_weight).cpu()

@@ -1,6 +1,8 @@
 name: MaskFormer_AlignedMTL
 
 model:
+  loss_weighting:
+    class_path: salt.models.AlignedMTL
   model:
     init_args:
       mask_decoder:

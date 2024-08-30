@@ -7,7 +7,7 @@ import torch
 from torch import nn
 
 from salt.models import InputNorm
-from salt.models.weighting import Static
+from salt.models.weighting import Static, Weighting
 
 
 def check_unique(modules: nn.ModuleList, attr_name: str) -> None:
@@ -21,11 +21,11 @@ class ModelWrapper(L.LightningModule):
         self,
         model: nn.Module,
         lrs_config: Mapping[str, float],
-        loss_weighting,
         global_object: str,
         norm_config: dict | None = None,
         name: str = "salt",
         muP_config: dict | None = None,
+        loss_weighting: Weighting | None = None,
         loss_mode: str = "wsum",
     ):
         """A wrapper class for any model implemented in Salt.
@@ -255,21 +255,25 @@ class ModelWrapper(L.LightningModule):
             self.log_weights(self.weighting.loss_weights, stage="train")
             if self.calc_cos_sim:
                 # log explicitly calculated gradients
-                self.grads = self.weighting.compute_grad(loss, mode="no_grad")
+                self.grads = self.weighting.compute_grad(loss, mode="autograd")
                 self.log_grads(self.grads)
+
                 # log cos similarities
                 self.weighting.compute_pairwise_cossim(self.grads)
                 self.log_cossim(self.weighting.task_pairs, self.weighting.cos_sims)
         else:
             opt = self.optimizers()
-            opt.zero_grad()  # Clear previous gradients
-            self.manual_backward(loss)  # Manually perform backward pass
-            opt.step()  # Update model parameters
+            opt.zero_grad()
+            self.manual_backward(loss)
+            opt.step()
             self.lr_schedulers().step()
+
             # log weights (gradients or loss weights for NashMTL, calculated in weighting class)
             self.log_weights(self.weighting.alpha, stage="train")
+
             # log transformed gradients from weighting methods (calculated in weighting class)
             self.log_grads(self.weighting.new_grads)
+
             # log cos similarities
             self.weighting.compute_pairwise_cossim(self.weighting.new_grads)
             self.log_cossim(self.weighting.task_pairs, self.weighting.cos_sims)

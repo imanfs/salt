@@ -1,6 +1,8 @@
 name: MaskFormer_MoCo
 
 model:
+  loss_weighting:
+    class_path: salt.models.MoCo
   model:
     init_args:
       mask_decoder:

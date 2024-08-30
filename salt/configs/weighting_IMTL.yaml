@@ -1,6 +1,8 @@
 name: MaskFormer_IMTL
 
 model:
+  loss_weighting:
+    class_path: salt.models.IMTL
   model:
     init_args:
       mask_decoder:

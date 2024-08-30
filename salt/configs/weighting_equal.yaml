@@ -8,7 +8,7 @@ model:
           loss_config:
             weighting: static
             num_classes: 2
-            loss_weights:
+            loss_weights: &loss_weights
               object_class_ce: 1.0
               mask_ce: 1.0
               mask_dice: 1.0
@@ -21,3 +21,8 @@ model:
               mask_ce: 10.0
               mask_dice: 2.0
               regression: 2.0
+  loss_weighting: 
+    class_path: salt.models.Static
+    init_args:
+      loss_weights: *loss_weights
+      

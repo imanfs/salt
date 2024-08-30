@@ -1,6 +1,8 @@
 name: MaskFormer_DWA
 
 model:
+  loss_weighting:
+    class_path: salt.models.DWA
   model:
     init_args:
       mask_decoder:

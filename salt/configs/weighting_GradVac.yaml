@@ -1,6 +1,8 @@
 name: MaskFormer_GradVac
 
 model:
+  loss_weighting:
+    class_path: salt.models.GradVac
   model:
     init_args:
       mask_decoder:

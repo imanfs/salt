@@ -1,6 +1,8 @@
 name: MaskFormer_UW
 
 model:
+  loss_weighting:
+    class_path: salt.models.UW
   model:
     init_args:
       mask_decoder:

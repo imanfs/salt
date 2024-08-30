@@ -1,6 +1,8 @@
 name: MaskFormer_NashMTL
 
 model:
+  loss_weighting:
+    class_path: salt.models.NashMTL
   model:
     init_args:
       mask_decoder:

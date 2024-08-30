@@ -50,7 +50,6 @@ from salt.models.weighting import (
 __all__ = [
     "DBMTL",
     "DWA",
-    "GLS",
     "IMTL",
     "RLW",
     "UW",

@@ -9,7 +9,7 @@ model:
     weight_decay: 1e-5
 
   model:
-    class_path: &model salt.models.SaltModel
+    class_path: salt.models.SaltModel
     init_args:
       init_nets:
         - input_name: tracks
@@ -146,7 +146,7 @@ model:
                   input_size: *embed_dim
                   context_size: *embed_dim
   loss_weighting:
-    class_path: salt.models.DBMTL
+    class_path: salt.models.CAGrad
 
 data:
   num_train: 500
