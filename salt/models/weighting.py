@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from scipy.optimize import minimize
 from torch import nn
 
-# from salt.models.gradients import Gradients
 try:
     import cvxpy as cp
 except ModuleNotFoundError:
@@ -16,23 +15,25 @@ except ModuleNotFoundError:
     import cvxpy as cp
 
 
-class Weighting(nn.Module):
-    def __init__(self, task_names=None, auto_opt=True, model=None):
+class Weighting:
+    def __init__(self, task_names=None, auto_opt=True):
         self.task_names = (
             task_names
             if task_names is not None
             else [
                 "mask_ce",
                 "mask_dice",
-                "jet_classification",
+                "jets_classification",
                 "track_origin",
                 "regression",
                 "object_class_ce",
             ]
         )
-        self.task_num = len(task_names)
+        self.task_num = len(self.task_names)
         self.auto_opt = auto_opt
         self.name = self.__class__.__name__
+
+    def set_model(self, model):
         self.model = model
 
     def weight_loss(self, losses: dict):
@@ -40,11 +41,13 @@ class Weighting(nn.Module):
 
     def on_fit_start(self, trainer):
         self.trainer = trainer
+        self.calc_cos_sim = False
         if not self.auto_opt:
             #  IMTL has torch.linalg.inv operations which needs 32bit or bfloat16 precision
             assert (
                 self.trainer.precision != "16-mixed"
             ), f"{self.name} requires 32-bit or bfloat16 precision for manual optimization."
+            self.calc_cos_sim = True
 
     def on_train_start(self):
         pass
@@ -79,10 +82,11 @@ class Weighting(nn.Module):
                 grad[i] = torch.zeros_like(param)  # Replace None gradient with a tensor of zeros
         return torch.cat([g.view(-1) for g in grad])
 
-    def _compute_grad(self, losses, mode):
+    def compute_grad(self, losses, mode):
         """mode: backward, autograd."""
+        self._compute_grad_dim()
         grads = torch.zeros(self.task_num, self.grad_dim)
-        for tn, task in enumerate(self.task_name):
+        for tn, task in enumerate(self.task_names):
             if mode == "backward":
                 losses[task].backward(retain_graph=True) if (tn + 1) != self.task_num else losses[
                     task
@@ -126,8 +130,7 @@ class Weighting(nn.Module):
         If ``rep_grad`` is ``False``, it returns the gradients of the shared parameters with size \
         of [task_num, -1], which means the gradient of each task is resized as a vector.
         """
-        self._compute_grad_dim()
-        return self._compute_grad(losses, mode)
+        return self.compute_grad(losses, mode)
 
     def _reset_grad(self, new_grads):
         for count, param in enumerate(self.model.parameters()):
@@ -159,16 +162,16 @@ class Weighting(nn.Module):
         self.cos_sims = []
         self.task_pairs = []
 
-        for a, task_a in enumerate(self.task_name):
-            for b, task_b in enumerate(self.task_name[a + 1 :], start=a + 1):
+        for a, task_a in enumerate(self.task_names):
+            for b, task_b in enumerate(self.task_names[a + 1 :], start=a + 1):
                 cos_sim = self._get_grad_cos_sim(grads[a], grads[b])
                 self.cos_sims.append(cos_sim.item())
                 self.task_pairs.append((task_a, task_b))
 
 
 class Static(Weighting):
-    def __init__(self, loss_weights: dict | None = None, task_names=None, model=None):
-        super().__init__(task_names=task_names, auto_opt=True, model=model)
+    def __init__(self, task_names=None, loss_weights: dict | None = None):
+        super().__init__(task_names=task_names, auto_opt=True)
         self.loss_weights = (
             loss_weights if loss_weights is not None else dict.fromkeys(task_names, 1.0)
         )
@@ -178,8 +181,8 @@ class Static(Weighting):
 
 
 class RLW(Weighting):
-    def __init__(self, task_names=None, model=None):
-        super().__init__(task_names=task_names, auto_opt=True, model=model)
+    def __init__(self, task_names=None):
+        super().__init__(task_names=task_names, auto_opt=True)
 
     def weight_loss(self, losses: dict) -> dict:
         weights = F.softmax(torch.randn(self.task_num), dim=-1)
@@ -187,8 +190,8 @@ class RLW(Weighting):
 
 
 class DWA(Weighting):
-    def __init__(self, task_names=None, model=None):
-        super().__init__(task_names=task_names, auto_opt=True, model=model)
+    def __init__(self, task_names=None):
+        super().__init__(task_names=task_names, auto_opt=True)
         self.avg_losses = {}
         self.batch_losses = {}
         self.current_epoch = 0
@@ -206,6 +209,7 @@ class DWA(Weighting):
             weights = self.task_num * F.softmax(w_i / T, dim=-1)
         else:
             weights = torch.ones(self.task_num)
+        self.loss_weights = {k: weights[i] for i, k in enumerate(self.task_names)}
         return {k: v * weights[i] for i, (k, v) in enumerate(losses.items())}
 
     def on_train_epoch_start(self):
@@ -224,11 +228,14 @@ class DWA(Weighting):
 
 
 class UW(Weighting):
-    def __init__(self, task_names=None, model=None):
-        super().__init__(task_names=task_names, auto_opt=True, model=model)
+    def __init__(self, task_names=None):
+        super().__init__(task_names=task_names, auto_opt=True)
         self.loss_scale = torch.nn.Parameter(torch.tensor([-0.5] * self.task_num))
 
     def weight_loss(self, losses: dict) -> dict:
+        self.loss_weights = {
+            k: 1 / (2 * self.loss_scale[i].exp()) for i, k in enumerate(self.task_names)
+        }
         return {
             key: value / (2 * self.loss_scale[i].exp()) + self.loss_scale[i] / 2
             for i, (key, value) in enumerate(losses.items())
@@ -236,11 +243,12 @@ class UW(Weighting):
 
 
 class IMTL(Weighting):
-    def __init__(self, task_names=None, model=None):
-        super().__init__(task_names=task_names, auto_opt=False, model=model)
+    def __init__(self, task_names=None):
+        super().__init__(task_names=task_names, auto_opt=False)
         self.loss_scale = nn.Parameter(torch.tensor([0.0] * self.task_num))
 
     def weight_loss(self, losses: dict) -> dict:
+        self.loss_weights = {k: self.loss_scale[i].exp() for i, k in enumerate(self.task_names)}
         return {
             task: self.loss_scale[tn].exp() * losses[task] - self.loss_scale[tn]
             for tn, task in enumerate(self.task_names)
@@ -274,8 +282,8 @@ class IMTL(Weighting):
 
 
 class AlignedMTL(Weighting):
-    def __init__(self, task_names=None, model=None):
-        super().__init__(task_names=task_names, auto_opt=False, model=model)
+    def __init__(self, task_names=None):
+        super().__init__(task_names=task_names, auto_opt=False)
 
     def manual_backward(self, losses):
         grads = self._get_grads(losses, mode="backward").to("cuda")
@@ -299,10 +307,8 @@ class AlignedMTL(Weighting):
 
 
 class NashMTL(Weighting):
-    def __init__(
-        self, task_names=None, model=None, update_weights_every=1, optim_niter=20, max_norm=1.0
-    ):
-        super().__init__(task_names=task_names, auto_opt=False, model=model)
+    def __init__(self, task_names=None, update_weights_every=1, optim_niter=20, max_norm=1.0):
+        super().__init__(task_names=task_names, auto_opt=False)
         self.update_weights_every = update_weights_every
         self.optim_niter = optim_niter
         self.max_norm = max_norm
@@ -318,8 +324,7 @@ class NashMTL(Weighting):
             self._init_optim_problem()
         if (self.step % self.update_weights_every) == 0:
             self.step += 1
-            self._compute_grad_dim()
-            grads = self._compute_grad(losses, mode="autograd")
+            grads = self.compute_grad(losses, mode="autograd")
 
             GTG = torch.mm(grads, grads.t())
             self.normalization_factor = (
@@ -337,7 +342,7 @@ class NashMTL(Weighting):
             self.step += 1
             alpha = self.prvs_alpha
 
-        alpha = torch.from_numpy(alpha).to(torch.bfloat16).to(self.device)
+        alpha = torch.from_numpy(alpha).to(torch.bfloat16).to("cuda")
         losses = {task: alpha[tn] * losses[task] for tn, task in enumerate(self.task_names)}
         sum(subloss for subloss in losses.values()).backward()
 
@@ -408,26 +413,24 @@ class MoCo(Weighting):
     def __init__(
         self,
         task_names=None,
-        model=None,
         MoCo_beta=0.5,
         MoCo_beta_sigma=0.5,
         MoCo_gamma=0.1,
         MoCo_gamma_sigma=0.5,
         MoCo_rho=0,
     ):
-        super().__init__(task_names=task_names, auto_opt=False, model=model)
+        super().__init__(task_names=task_names, auto_opt=False)
         self.beta, self.beta_sigma = MoCo_beta, MoCo_beta_sigma
         self.gamma, self.gamma_sigma = MoCo_gamma, MoCo_gamma_sigma
         self.rho = MoCo_rho
 
-        self._compute_grad_dim()
         self.step = 0
+        self._compute_grad_dim()
         self.y = torch.zeros(self.task_num, self.grad_dim).to("cuda")
         self.lambd = (torch.ones([self.task_num]) / self.task_num).to("cuda")
 
     def manual_backward(self, losses: dict):
-        self._compute_grad_dim()
-        grads = self._compute_grad(losses, mode="backward").to("cuda")
+        grads = self.compute_grad(losses, mode="backward").to("cuda")
         with torch.no_grad():
             for tn, task in enumerate(self.task_names):
                 grads[tn] = grads[tn] / (grads[tn].norm() + 1e-6) * losses[task]
@@ -450,8 +453,8 @@ class MoCo(Weighting):
 
 
 class DBMTL(Weighting):
-    def __init__(self, task_names=None, model=None, DB_beta=0.9, DB_beta_sigma=0):
-        super().__init__(task_names=task_names, auto_opt=False, model=model)
+    def __init__(self, task_names=None, DB_beta=0.9, DB_beta_sigma=0):
+        super().__init__(task_names=task_names, auto_opt=False)
         self.beta, self.beta_sigma = DB_beta, DB_beta_sigma
         self.step = 0
         self._compute_grad_dim()
@@ -460,9 +463,8 @@ class DBMTL(Weighting):
     def manual_backward(self, losses: dict):
         self.step += 1
 
-        self._compute_grad_dim()
         log_loss = {k: torch.log(v + 1e-8) for k, v in losses.items()}
-        grads = self._compute_grad(log_loss, mode="backward").to("cuda")
+        grads = self.compute_grad(log_loss, mode="backward").to("cuda")
         # [task_num, grad_dim]
 
         self.grad_buffer = grads + (self.beta / self.step**self.beta_sigma) * (
@@ -479,13 +481,12 @@ class DBMTL(Weighting):
 
 
 class PCGrad(Weighting):
-    def __init__(self, task_names=None, model=None):
-        super().__init__(task_names=task_names, auto_opt=False, model=model)
+    def __init__(self, task_names=None):
+        super().__init__(task_names=task_names, auto_opt=False)
 
     def manual_backward(self, losses: dict):
         batch_weight = np.ones(len(losses))
-        self._compute_grad_dim()
-        grads = self._compute_grad(losses, mode="backward").to("cuda")  # [task_num, grad_dim]
+        grads = self.compute_grad(losses, mode="backward").to("cuda")  # [task_num, grad_dim]
         pc_grads = grads.clone()
         for tn_i in range(self.task_num):
             task_index = torch.randperm(self.task_num, device="cuda")
@@ -502,15 +503,14 @@ class PCGrad(Weighting):
 
 
 class CAGrad(Weighting):
-    def __init__(self, task_names=None, model=None, calpha=0.5, rescale=1):
-        super().__init__(task_names=task_names, auto_opt=False, model=model)
+    def __init__(self, task_names=None, calpha=0.5, rescale=1):
+        super().__init__(task_names=task_names, auto_opt=False)
 
         self.calpha = calpha
         self.rescale = rescale
 
     def manual_backward(self, losses: dict):
-        self._compute_grad_dim()
-        grads = self._compute_grad(losses, mode="backward").to("cuda")
+        grads = self.compute_grad(losses, mode="backward").to("cuda")
 
         GG = torch.matmul(grads, grads.t()).cpu()  # [num_tasks, num_tasks]
         g0_norm = (GG.mean() + 1e-8).sqrt()  # norm of the average gradient
@@ -530,7 +530,7 @@ class CAGrad(Weighting):
 
         res = minimize(objfn, x_start, bounds=bnds, constraints=cons)
         w_cpu = res.x
-        ww = torch.Tensor(w_cpu).to(self.device)
+        ww = torch.Tensor(w_cpu).to("cuda")
         gw = (grads * ww.view(-1, 1)).sum(0)
         gw_norm = gw.norm()
         lmbda = c / (gw_norm + 1e-8)
@@ -551,8 +551,8 @@ class CAGrad(Weighting):
 
 
 class GradVac(Weighting):
-    def __init__(self, task_names=None, model=None, GradVac_beta=0.5, GradVac_group_type=0):
-        super().__init__(task_names=task_names, auto_opt=False, model=model)
+    def __init__(self, task_names=None, GradVac_beta=0.5, GradVac_group_type=0):
+        super().__init__(task_names=task_names, auto_opt=False)
         self.beta = GradVac_beta
         self.group_type = GradVac_group_type
 
@@ -562,8 +562,7 @@ class GradVac(Weighting):
         if self.step == 0:
             self._init_rho(self.group_type)
 
-        self._compute_grad_dim()
-        grads = self._compute_grad(losses, mode="backward").to("cuda")  # [task_num, grad_dim]
+        grads = self.compute_grad(losses, mode="backward").to("cuda")  # [task_num, grad_dim]
 
         batch_weight = np.ones(len(losses))
         pc_grads = grads.clone()

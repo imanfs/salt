@@ -31,6 +31,7 @@ from salt.models.transformer import (
 )
 from salt.models.transformer_v2 import TransformerV2
 from salt.models.weighting import (
+    DBMTL,
     DWA,
     IMTL,
     RLW,
@@ -47,6 +48,7 @@ from salt.models.weighting import (
 # from salt.models.maskformer import MaskFormer
 
 __all__ = [
+    "DBMTL",
     "DWA",
     "GLS",
     "IMTL",

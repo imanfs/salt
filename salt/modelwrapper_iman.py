@@ -360,7 +360,8 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
         if self.automatic_optimization:
             self.log_weights(self.loss_weights, stage="train")
             if self.calc_cos_sim:
-                self.new_grads = self._compute_grad(loss, mode="no_grad")  # for cossim calculation
+                self.weighting.compute_grad_dim()
+                self.new_grads = self._compute_grad(loss, mode="autograd")  # for cossim calculation
                 self.log_grads(self.new_grads)
 
         else:
@@ -721,8 +722,8 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
                 grads[tn] = self._combine_grads(grad)
             else:
                 raise ValueError("No support {} mode for gradient computation")
-            if not self.automatic_optimization:
-                self.model.zero_grad(set_to_none=False)
+            self.model.zero_grad(set_to_none=False)
+        print(grads[:10])
         return grads
 
     def _get_grads(self, losses, mode="backward"):

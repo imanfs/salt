@@ -21,7 +21,7 @@ class ModelWrapper(L.LightningModule):
         self,
         model: nn.Module,
         lrs_config: Mapping[str, float],
-        loss_weighting: nn.Module,
+        loss_weighting,
         global_object: str,
         norm_config: dict | None = None,
         name: str = "salt",
@@ -64,12 +64,13 @@ class ModelWrapper(L.LightningModule):
             - 'GLS' : arxiv.org/1904.08492
         loss_weighting: str, optional
             The loss weighting to use. Default is "Static", which requires setting manual weights.
+        loss_weighting_config: dict, optional
+            The loss weighting configuration. Contains kwargs for the loss weighting class.
         """
         super().__init__()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             self.save_hyperparameters(logger=False)
-
         self.model = model
         self.lrs_config = lrs_config
         self.global_object = global_object
@@ -108,12 +109,14 @@ class ModelWrapper(L.LightningModule):
                 task.weight == 1.0 for task in self.model.tasks
             ), "GLS does not utilise task weights - remove all/set to 1"
 
-        self.weighting = loss_weighting() if loss_weighting() is not None else Static()
-        self.calc_cos_sim = False  # set to true if you want to calculate cosine similarities
+        self.weighting = loss_weighting if loss_weighting else Static
+        self.weighting.set_model(self.model)
+        self.calc_cos_sim = True  # self.weighting.calc_cos_sim # override if desired for auto opt
         self.automatic_optimization = self.weighting.auto_opt
+        self.task_names = self.weighting.task_names
 
     def on_fit_start(self):
-        self.weighting.on_fit_start()
+        self.weighting.on_fit_start(trainer=self.trainer)
 
     def on_train_start(self):
         self.weighting.on_train_start()
@@ -216,7 +219,7 @@ class ModelWrapper(L.LightningModule):
     def log_grads(self, grads):
         kwargs = {"sync_dist": len(self.trainer.device_ids) > 1}
         if not isinstance(grads, dict):
-            grads = {task: grads[tn] for tn, task in enumerate(self.task_name)}
+            grads = {task: grads[tn] for tn, task in enumerate(self.task_names)}
         for t, grad in grads.items():
             n = f"{t}_grad"
             L1_norm = torch.norm(grad, p=1)
@@ -227,12 +230,13 @@ class ModelWrapper(L.LightningModule):
     def training_step(self, batch):
         # forward pass
         preds, labels, pad_masks, loss = self.shared_step(batch)
-
-        log_loss = self.total_loss(loss)
+        log_loss = loss.copy()
+        log_loss["loss"] = self.total_loss(log_loss)
         self.log_losses(log_loss, stage="train")
 
         # weight and combine losses
-        loss = self.total_loss(self.weight_loss(loss))
+        loss = self.weighting.weight_loss(loss)
+        loss["loss"] = self.total_loss(loss)
         if loss["loss"].isnan():
             raise RuntimeError(
                 "Loss is NaN - this indicates something significant has gone wrong."
@@ -247,27 +251,28 @@ class ModelWrapper(L.LightningModule):
         }
 
         if self.automatic_optimization:
-            self.log_weights(self.loss_weights, stage="train")
+            # log weights (calculated in weighting class)
+            self.log_weights(self.weighting.loss_weights, stage="train")
             if self.calc_cos_sim:
-                # log gradients
-                self.new_grads = self._compute_grad(loss, mode="no_grad")
-                self.log_grads(self.new_grads)
+                # log explicitly calculated gradients
+                self.grads = self.weighting.compute_grad(loss, mode="no_grad")
+                self.log_grads(self.grads)
                 # log cos similarities
-                self.compute_pairwise_cossim(self.new_grads)
-                self.log_cossim(self.task_pairs, self.cos_sims)
+                self.weighting.compute_pairwise_cossim(self.grads)
+                self.log_cossim(self.weighting.task_pairs, self.weighting.cos_sims)
         else:
             opt = self.optimizers()
             opt.zero_grad()  # Clear previous gradients
             self.manual_backward(loss)  # Manually perform backward pass
             opt.step()  # Update model parameters
             self.lr_schedulers().step()
-            # log weights (gradients or loss weights for NashMTL)
-            self.log_weights(self.alpha, stage="train")
-            # log gradients
-            self.log_grads(self.new_grads)
+            # log weights (gradients or loss weights for NashMTL, calculated in weighting class)
+            self.log_weights(self.weighting.alpha, stage="train")
+            # log transformed gradients from weighting methods (calculated in weighting class)
+            self.log_grads(self.weighting.new_grads)
             # log cos similarities
-            self.compute_pairwise_cossim(self.new_grads)
-            self.log_cossim(self.task_pairs, self.cos_sims)
+            self.weighting.compute_pairwise_cossim(self.weighting.new_grads)
+            self.log_cossim(self.weighting.task_pairs, self.weighting.cos_sims)
 
         return {**loss, "outputs": outputs}
 
@@ -276,11 +281,13 @@ class ModelWrapper(L.LightningModule):
         preds, labels, pad_masks, loss = self.shared_step(batch)
 
         # log raw losses
-        log_loss = self.total_loss(loss)
+        log_loss = loss.copy()
+        log_loss["loss"] = self.total_loss(log_loss)
         self.log_losses(log_loss, stage="val")
 
         # weight and combine losses
-        loss = self.total_loss(self.weight_loss(loss))
+        loss = self.weighting.weight_loss(loss)
+        loss["loss"] = self.total_loss(loss)
 
         # Store outputs to be used by the MaskformerMetrics callback
         outputs = {
