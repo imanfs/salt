@@ -257,7 +257,7 @@ class ModelWrapper(L.LightningModule):
             self.log_weights(self.weighting.loss_weights, stage="train")
             if self.calc_cos_sim:
                 # log explicitly calculated gradients
-                self.grads = self.weighting.compute_grad(loss, mode="autograd")
+                self.grads = self.weighting.compute_grad(loss, mode="autograd", exclude_none=True)
                 self.log_grads(self.grads)
 
                 # log cos similarities

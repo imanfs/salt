@@ -83,18 +83,37 @@ class Weighting:
                 grad[beg:end] = param.grad.data.view(-1)
         return grad
 
-    def _combine_grads(self, grad):
+    def _combine_grads(self, grad):  # exclude_none=False, none_grads=None):
         """Filter out or zero out gradients for parameters that have None gradients."""
+        # if exclude_none:
+        #     grad = [g for i, g in enumerate(grad) if i not in none_grads]
+        # else:
         for i, (g, param) in enumerate(zip(grad, self.model.parameters(), strict=False)):
             if g is None:
-                grad[i] = torch.zeros_like(param)  # Replace None gradient with a tensor of zeros
-        return torch.cat([g.view(-1) for g in grad])
+                grad[i] = torch.zeros_like(param)  # Replace None gradient with zeros
+                self.none_grads.add(i)  # Track parameters with None gradients
+        return torch.cat([g.view(-1) for g in grad if g is not None])
 
-    def compute_grad(self, losses, mode):
+    def filter_grads(self, grad, none_grads):
+        """Filter out gradients for parameters that had None gradients."""
+        mask = torch.ones(grad.numel(), dtype=torch.bool)
+
+        # Set the mask to False for None gradient indices
+        cumulative_size = 0
+        for i, param in enumerate(self.model.parameters()):
+            if i in none_grads:
+                mask[cumulative_size : cumulative_size + param.numel()] = False
+            cumulative_size += param.numel()
+
+        return grad[mask]
+
+    def compute_grad(self, losses, mode, exclude_none=False):
         """mode: backward, autograd."""
         self._compute_grad_dim()
         grads = torch.zeros(self.task_num, self.grad_dim)
+        self.none_grads = set()
         for tn, task in enumerate(self.task_names):
+            self.count_none_grad = 0
             if mode == "backward":
                 losses[task].backward(retain_graph=True) if (tn + 1) != self.task_num else losses[
                     task
@@ -109,10 +128,17 @@ class Weighting:
                         allow_unused=True,
                     )
                 )
+
                 grads[tn] = self._combine_grads(grad)
             else:
                 raise ValueError("No support {} mode for gradient computation")
             self.model.zero_grad(set_to_none=False)
+        if exclude_none:
+            filtered_grads = []
+            for tn in range(self.task_num):
+                grad = self.filter_grads(grads[tn], self.none_grads)
+                filtered_grads.append(grad)
+            grads = torch.stack(filtered_grads)
         return grads
 
     def _get_grads(self, losses, mode="backward"):
