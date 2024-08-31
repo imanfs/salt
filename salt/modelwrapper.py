@@ -64,8 +64,9 @@ class ModelWrapper(L.LightningModule):
             - 'GLS' : arxiv.org/1904.08492
         loss_weighting: str, optional
             The loss weighting to use. Default is "Static", which requires setting manual weights.
-        loss_weighting_config: dict, optional
-            The loss weighting configuration. Contains kwargs for the loss weighting class.
+            Other options are
+            DWA, UW, DWA, RLW, NashMTL, IMTL, AlignedMTL, DBMTL, MoCo, PCGrad, CAGrad, GradVac
+            Refer to salt.models.weighting for more information on each strategy
         """
         super().__init__()
         with warnings.catch_warnings():
@@ -109,9 +110,10 @@ class ModelWrapper(L.LightningModule):
                 task.weight == 1.0 for task in self.model.tasks
             ), "GLS does not utilise task weights - remove all/set to 1"
 
-        self.weighting = loss_weighting if loss_weighting else Static
+        self.weighting = loss_weighting if loss_weighting else Static()
         self.weighting.set_model(self.model)
-        self.calc_cos_sim = True  # self.weighting.calc_cos_sim # override if desired for auto opt
+        # self.calc_cos_cim = self.weighting.calc_cos_sim # override to True if desired for auto opt
+        self.calc_cos_sim = True
         self.automatic_optimization = self.weighting.auto_opt
         self.task_names = self.weighting.task_names
 

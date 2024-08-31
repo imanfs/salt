@@ -58,7 +58,7 @@ model:
           loss_config:
             weighting: static
             num_classes: 2
-            loss_weights:
+            loss_weights: &loss_weights
               object_class_ce: 2.0
               mask_ce: 10.0
               mask_dice: 2.0
@@ -146,7 +146,9 @@ model:
                   input_size: *embed_dim
                   context_size: *embed_dim
   loss_weighting:
-    class_path: salt.models.CAGrad
+    class_path: salt.models.Static
+    init_args:
+      loss_weights: *loss_weights
 
 data:
   num_train: 500

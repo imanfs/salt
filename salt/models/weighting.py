@@ -16,37 +16,43 @@ except ModuleNotFoundError:
 
 
 class Weighting:
-    def __init__(self, task_names=None, auto_opt=True):
+    def __init__(self, task_names: list | None = None, auto_opt: bool = True):
         self.task_names = (
             task_names
             if task_names is not None
             else [
+                "object_class_ce",
                 "mask_ce",
                 "mask_dice",
+                "regression",
                 "jets_classification",
                 "track_origin",
-                "regression",
-                "object_class_ce",
             ]
         )
         self.task_num = len(self.task_names)
         self.auto_opt = auto_opt
         self.name = self.__class__.__name__
-        print(f"Model is being trained with {self.name} weighting.")
+        print(
+            "-----------------------------------------------------------------------------------"
+            "-----------------\n"
+            f"Model is being trained with {self.name} weighting."
+        )
 
-    def set_model(self, model):
+    def set_model(self, model: nn.Module):
+        """Sets the model for parameter access."""
         self.model = model
 
     def weight_loss(self, losses: dict):
+        """Weights the losses based on the weighting method."""
         return losses
 
     def on_fit_start(self, trainer):
-        self.trainer = trainer
+        self.max_epochs = trainer.max_epochs
         self.calc_cos_sim = False
         if not self.auto_opt:
             #  IMTL has torch.linalg.inv operations which needs 32bit or bfloat16 precision
             assert (
-                self.trainer.precision != "16-mixed"
+                trainer.precision != "16-mixed"
             ), f"{self.name} requires 32-bit or bfloat16 precision for manual optimization."
             self.calc_cos_sim = True
 
@@ -78,6 +84,7 @@ class Weighting:
         return grad
 
     def _combine_grads(self, grad):
+        """Filter out or zero out gradients for parameters that have None gradients."""
         for i, (g, param) in enumerate(zip(grad, self.model.parameters(), strict=False)):
             if g is None:
                 grad[i] = torch.zeros_like(param)  # Replace None gradient with a tensor of zeros
@@ -103,21 +110,9 @@ class Weighting:
                     )
                 )
                 grads[tn] = self._combine_grads(grad)
-            elif mode == "no_grad":
-                with torch.no_grad():
-                    grad = list(
-                        torch.autograd.grad(
-                            losses[task],
-                            self.model.parameters(),
-                            retain_graph=True,
-                            allow_unused=True,
-                        )
-                    )
-                grads[tn] = self._combine_grads(grad)
             else:
                 raise ValueError("No support {} mode for gradient computation")
-            if not self.auto_opt:
-                self.model.zero_grad(set_to_none=False)
+            self.model.zero_grad(set_to_none=False)
         return grads
 
     def _get_grads(self, losses, mode="backward"):
@@ -223,7 +218,7 @@ class DWA(Weighting):
         self.current_epoch = 0
 
     def on_train_start(self):
-        self.train_loss_buffer = torch.zeros([6, self.trainer.max_epochs])
+        self.train_loss_buffer = torch.zeros([6, self.max_epochs])
 
     def weight_loss(self, losses: dict) -> dict:
         T = 2.0

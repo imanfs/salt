@@ -360,7 +360,6 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
         if self.automatic_optimization:
             self.log_weights(self.loss_weights, stage="train")
             if self.calc_cos_sim:
-                self.weighting.compute_grad_dim()
                 self.new_grads = self._compute_grad(loss, mode="autograd")  # for cossim calculation
                 self.log_grads(self.new_grads)
 
@@ -537,8 +536,8 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
                     if g_ij < 0:
                         pc_grads[tn_i] -= g_ij * grads[tn_j] / (grads[tn_j].norm().pow(2) + 1e-8)
                         batch_weight[tn_j] -= (g_ij / (grads[tn_j].norm().pow(2) + 1e-8)).item()
-            self.new_grads = pc_grads.sum(0)
-            self._reset_grad(self.new_grads)
+            self.new_grads = pc_grads
+            self._reset_grad(self.new_grads.sum(0))
             # record alpha for weight logging
             alpha = torch.Tensor(batch_weight)
 
@@ -625,8 +624,8 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
                         self.rho_T[tn_i, tn_j, k] = (1 - beta) * self.rho_T[
                             tn_i, tn_j, k
                         ] + beta * rho_ijk
-            self.new_grads = pc_grads.sum(0)
-            self._reset_grad(self.new_grads)
+            self.new_grads = pc_grads
+            self._reset_grad(self.new_grads.sum(0))
             self.step += 1
             # record alpha for weight logging
             alpha = torch.Tensor(batch_weight)
@@ -723,7 +722,6 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
             else:
                 raise ValueError("No support {} mode for gradient computation")
             self.model.zero_grad(set_to_none=False)
-        print(grads[:10])
         return grads
 
     def _get_grads(self, losses, mode="backward"):
