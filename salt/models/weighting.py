@@ -211,23 +211,36 @@ class DWA(Weighting):
 
     """
 
-    def __init__(self, task_names=None):
+    def __init__(self, task_names=None, T=2.0):
         super().__init__(task_names=task_names, auto_opt=True)
         self.avg_losses = {}
         self.batch_losses = {}
         self.current_epoch = 0
+        self.T = T
 
     def on_train_start(self):
         self.train_loss_buffer = torch.zeros([6, self.max_epochs])
 
+    def on_train_batch_end(self, losses: dict):
+        for task_name, loss_item in losses.items():
+            if task_name not in self.batch_losses:
+                self.batch_losses[task_name] = []
+            self.batch_losses[task_name].append(loss_item.detach())
+
     def weight_loss(self, losses: dict) -> dict:
-        T = 2.0
+        # since we run weight_loss after the end of each batch, updating batch_losses here
+        #  is equivalent to calling on_train_batch_end() and updating there
+        for task_name, loss_item in losses.items():
+            if task_name not in self.batch_losses:
+                self.batch_losses[task_name] = []
+            self.batch_losses[task_name].append(loss_item.detach())
+
         if self.current_epoch > 1:
             w_i = torch.Tensor(
                 self.train_loss_buffer[:, self.current_epoch - 1]
                 / self.train_loss_buffer[:, self.current_epoch - 2]
             )
-            weights = self.task_num * F.softmax(w_i / T, dim=-1)
+            weights = self.task_num * F.softmax(w_i / self.T, dim=-1)
         else:
             weights = torch.ones(self.task_num)
         self.loss_weights = {k: weights[i] for i, k in enumerate(self.task_names)}

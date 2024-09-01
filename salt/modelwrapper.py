@@ -65,7 +65,7 @@ class ModelWrapper(L.LightningModule):
         loss_weighting: str, optional
             The loss weighting to use. Default is "Static", which requires setting manual weights.
             Other options are
-            DWA, UW, DWA, RLW, NashMTL, IMTL, AlignedMTL, DBMTL, MoCo, PCGrad, CAGrad, GradVac
+            - DWA, UW, DWA, RLW, NashMTL, IMTL, AlignedMTL, DBMTL, MoCo, PCGrad, CAGrad, GradVac
             Refer to salt.models.weighting for more information on each strategy
         """
         super().__init__()
@@ -233,7 +233,7 @@ class ModelWrapper(L.LightningModule):
         # forward pass
         preds, labels, pad_masks, loss = self.shared_step(batch)
         log_loss = loss.copy()
-        log_loss["loss"] = self.total_loss(log_loss)
+        log_loss["loss"] = sum(subloss for subloss in loss.values())
         self.log_losses(log_loss, stage="train")
 
         # weight and combine losses
@@ -257,7 +257,7 @@ class ModelWrapper(L.LightningModule):
             self.log_weights(self.weighting.loss_weights, stage="train")
             if self.calc_cos_sim:
                 # log explicitly calculated gradients
-                self.grads = self.weighting.compute_grad(loss, mode="autograd")
+                self.grads = self.weighting.compute_grad(loss, mode="autograd").to("cuda")
                 self.log_grads(self.grads)
 
                 # log cos similarities

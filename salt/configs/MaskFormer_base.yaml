@@ -99,7 +99,7 @@ model:
                 name: regression
                 targets: ["pt", "Lxy", "deta", "dphi", "mass"]
                 input_name: objects
-                weight: 0.5
+                weight: 1
                 scaler:
                   class_path: salt.utils.scalers.RegressionTargetScaler
                   init_args:
@@ -135,7 +135,7 @@ model:
                 name: track_origin
                 input_name: tracks
                 label: ftagTruthOriginLabel
-                weight: 0.5
+                weight: 1.0
                 loss:
                   class_path: torch.nn.CrossEntropyLoss
                   init_args:
