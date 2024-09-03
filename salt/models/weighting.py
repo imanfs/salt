@@ -183,7 +183,7 @@ class Static(Weighting):
     def __init__(self, task_names=None, loss_weights: dict | None = None):
         super().__init__(task_names=task_names, auto_opt=True)
         self.loss_weights = (
-            loss_weights if loss_weights is not None else dict.fromkeys(task_names, 1.0)
+            loss_weights if loss_weights is not None else dict.fromkeys(self.task_names, 1.0)
         )
         print("Weights are: ", self.loss_weights)
 
@@ -203,14 +203,10 @@ class GLS(Weighting):
     """
 
     def __init__(self, task_names=None):
-        super().__init__(task_names=task_names, auto_opt=False)
-        self.alpha = dict.fromkeys(self.task_names, 1.0)
+        super().__init__(task_names=task_names, auto_opt=True)
 
     def total_loss(self, loss: dict, loss_mode: str = "GLS"):
         return super().total_loss(loss, loss_mode)
-
-    def manual_backward(self, loss):
-        loss["loss"].backward()
 
 
 class RLW(Weighting):
@@ -789,7 +785,7 @@ class STCH(Weighting):
     """
 
     def __init__(self, task_names=None, mu=1.0, warmup_epoch=4):
-        super().__init__(task_names=task_names, auto_opt=False)
+        super().__init__(task_names=task_names, auto_opt=True)
 
         self.mu = mu
         self.warmup_epoch = warmup_epoch
@@ -798,38 +794,42 @@ class STCH(Weighting):
         self.step = 0
         self.nadir_vector = None  # None
 
-        self.average_loss = 0.0
         self.average_loss_count = 0
+        self.average_loss = dict.fromkeys(self.task_names, 0.0)
+        self.loss_weights = dict.fromkeys(self.task_names, 1.0)
 
     def on_train_epoch_end(self):
         self.current_epoch += 1
 
-    def manual_backward(self, losses_dict: dict):
-        self.step += 1
-        losses = torch.stack([losses_dict[task] for tn, task in enumerate(self.task_names)])
-        batch_weight = np.ones(len(losses))
-        if self.current_epoch < self.warmup_epoch:
-            loss = torch.mul(torch.log(losses + 1e-20), torch.ones_like(losses).to("cuda")).sum()
-            loss.backward()
-        elif self.current_epoch == self.warmup_epoch:
-            loss = torch.mul(torch.log(losses + 1e-20), torch.ones_like(losses).to("cuda")).sum()
-            self.average_loss += losses.detach()
-            self.average_loss_count += 1
+    def total_loss(self, losses: dict, loss_mode: str = "STCH"):
+        if loss_mode == "STCH":
+            self.step += 1
 
-            loss.backward()
+            if self.current_epoch < self.warmup_epoch:
+                losses = {task: torch.log(losses[task] + 1e-20) for task in self.task_names}
+                return sum(subloss for subloss in losses.values())
 
-        else:
+            if self.current_epoch == self.warmup_epoch:
+                losses = {task: torch.log(losses[task] + 1e-20) for task in self.task_names}
+                # Accumulate the detached losses
+                for key, loss in losses.items():
+                    self.average_loss[key] += loss.detach()
+                self.average_loss_count += 1
+                return sum(subloss for subloss in loss.values())
+
             if self.nadir_vector is None:
                 self.nadir_vector = self.average_loss / self.average_loss_count
-                print(self.nadir_vector)
 
-            losses = torch.log(losses / self.nadir_vector + 1e-20)
-            max_term = torch.max(losses.data).detach()
-            reg_losses = losses - max_term
-            loss = self.mu * torch.log(torch.sum(torch.exp(reg_losses / self.mu))) * self.task_num
-            loss.backward()
+            losses = {
+                task: torch.log(losses[task] / self.nadir_vector[task] + 1e-20)
+                for task in self.task_names
+            }
+            max_term = max([losses[task].data.max().detach() for task in self.task_names])
+            reg_losses = {task: loss - max_term for task, loss in losses.items()}
 
-        self.alpha = {task: batch_weight[tn] for tn, task in enumerate(self.task_names)}
+            reg_losses = torch.stack(list(reg_losses.values()))
+            return self.mu * torch.log(torch.sum(torch.exp(reg_losses / self.mu))) * self.task_num
+        return super().total_loss(losses, loss_mode)
 
 
 class GradNorm(Weighting):
