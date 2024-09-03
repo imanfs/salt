@@ -743,3 +743,57 @@ class GradVac(Weighting):
         else:
             raise ValueError
         self.rho_T = torch.zeros(self.task_num, self.task_num, len(self.k_idx)).to("cuda")
+
+
+class STCH(Weighting):
+    """Smooth Tchebycheff Scalarization (STCH).
+
+    Proposed in Smooth Tchebycheff Scalarization for Multi-Objective Optimization:
+      <https://arxiv.org/pdf/2402.19078>
+    and implemented in the LibMTL framework by the authors:
+      <https://github.com/Xi-L/STCH>.
+
+    """
+
+    def __init__(self, task_names=None, mu=1.0, warmup_epoch=4):
+        super().__init__(task_names=task_names, auto_opt=False)
+
+        self.mu = mu
+        self.warmup_epoch = warmup_epoch
+
+        self.current_epoch = 0
+        self.step = 0
+        self.nadir_vector = None  # None
+
+        self.average_loss = 0.0
+        self.average_loss_count = 0
+
+    def on_train_epoch_end(self):
+        self.current_epoch += 1
+
+    def manual_backward(self, losses_dict: dict):
+        self.step += 1
+        losses = torch.stack(list(losses_dict.values()))
+        batch_weight = np.ones(len(losses))
+        if self.current_epoch < self.warmup_epoch:
+            loss = torch.mul(torch.log(losses + 1e-20), torch.ones_like(losses).to("cuda")).sum()
+            loss.backward()
+        elif self.current_epoch == self.warmup_epoch:
+            loss = torch.mul(torch.log(losses + 1e-20), torch.ones_like(losses).to("cuda")).sum()
+            self.average_loss += losses.detach()
+            self.average_loss_count += 1
+
+            loss.backward()
+
+        else:
+            if self.nadir_vector is None:
+                self.nadir_vector = self.average_loss / self.average_loss_count
+                print(self.nadir_vector)
+
+            losses = torch.log(losses / self.nadir_vector + 1e-20)
+            max_term = torch.max(losses.data).detach()
+            reg_losses = losses - max_term
+            loss = self.mu * torch.log(torch.sum(torch.exp(reg_losses / self.mu))) * self.task_num
+            loss.backward()
+
+        self.alpha = {task: batch_weight[tn] for tn, task in enumerate(self.task_names)}

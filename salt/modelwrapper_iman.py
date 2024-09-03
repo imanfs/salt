@@ -10,6 +10,7 @@ from scipy.optimize import minimize
 from torch import nn
 
 from salt.models import InputNorm
+from salt.models.weighting import Weighting
 
 try:
     import cvxpy as cp
@@ -35,6 +36,8 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
         norm_config: dict | None = None,
         name: str = "salt",
         muP_config: dict | None = None,
+        loss_weighting: Weighting | None = None,
+        loss_mode: str = "wsum",
     ):
         """A wrapper class for any model implemented in Salt.
 
@@ -66,6 +69,10 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
             Name of the model, used for logging and inference output names
         muP_config: dict, optional
             The muP configuration.
+        loss_weighting: Weighting, optional
+            The weighting method for the loss function. Defaults to None.
+        loss_mode: str, optional
+            The loss mode for the loss function. Defaults to "wsum".
         """
         super().__init__()
         with warnings.catch_warnings():
@@ -104,11 +111,13 @@ class ModelWrapperIman(L.LightningModule):  # noqa: PLR0904
         self.norm = InputNorm(**norm_config)
 
         # weighting params
+        self.loss_mode = loss_mode
         self.weighting = self.model.mask_decoder.mask_loss.weighting
+        self.lw = loss_weighting
         self.loss_weights = self.model.mask_decoder.mask_loss.loss_weights
         self.task_num = len(self.loss_weights)
         self.task_name = list(self.loss_weights.keys())
-        self.calc_cos_sim = True
+        self.calc_cos_sim = False
         self.init_param()
         self.rep_grad = False
         self.cos_sim = nn.CosineSimilarity(dim=0)

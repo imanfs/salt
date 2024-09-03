@@ -113,7 +113,7 @@ class ModelWrapper(L.LightningModule):
         self.weighting = loss_weighting if loss_weighting else Static()
         self.weighting.set_model(self.model)
         # self.calc_cos_cim = self.weighting.calc_cos_sim # override to True if desired for auto opt
-        self.calc_cos_sim = True
+        self.calc_cos_sim = False
         self.automatic_optimization = self.weighting.auto_opt
         self.task_names = self.weighting.task_names
 
@@ -233,7 +233,7 @@ class ModelWrapper(L.LightningModule):
         # forward pass
         preds, labels, pad_masks, loss = self.shared_step(batch)
         log_loss = loss.copy()
-        log_loss["loss"] = sum(subloss for subloss in loss.values())
+        log_loss["loss"] = sum(subloss for subloss in log_loss.values())
         self.log_losses(log_loss, stage="train")
 
         # weight and combine losses
@@ -273,12 +273,12 @@ class ModelWrapper(L.LightningModule):
             # log weights (gradients or loss weights for NashMTL, calculated in weighting class)
             self.log_weights(self.weighting.alpha, stage="train")
 
-            # log transformed gradients from weighting methods (calculated in weighting class)
-            self.log_grads(self.weighting.new_grads)
-
-            # log cos similarities
-            self.weighting.compute_pairwise_cossim(self.weighting.new_grads)
-            self.log_cossim(self.weighting.task_pairs, self.weighting.cos_sims)
+            if self.calc_cos_sim:
+                # log transformed gradients from weighting methods (calculated in weighting class)
+                self.log_grads(self.weighting.new_grads)
+                # log cos similarities
+                self.weighting.compute_pairwise_cossim(self.weighting.new_grads)
+                self.log_cossim(self.weighting.task_pairs, self.weighting.cos_sims)
 
         return {**loss, "outputs": outputs}
 
