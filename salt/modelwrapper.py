@@ -238,7 +238,7 @@ class ModelWrapper(L.LightningModule):
 
         # weight and combine losses
         loss = self.weighting.weight_loss(loss)
-        loss["loss"] = self.total_loss(loss)
+        loss["loss"] = self.weighting.total_loss(loss)
         if loss["loss"].isnan():
             raise RuntimeError(
                 "Loss is NaN - this indicates something significant has gone wrong."

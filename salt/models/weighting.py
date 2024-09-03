@@ -1,3 +1,4 @@
+import math
 import random
 
 import numpy as np
@@ -46,6 +47,16 @@ class Weighting:
         """Weights the losses based on the weighting method."""
         return losses
 
+    def total_loss(self, loss: dict, loss_mode: str = "wsum"):
+        """Computes the final loss based on the loss mode."""
+        if loss_mode == "GLS":
+            # Calculate the geometric mean of the losses
+            loss_prod = math.prod(subloss for subloss in loss.values())
+            return torch.pow(loss_prod, 1.0 / len(loss))
+
+        # Return the default weighted sum
+        return sum(subloss for subloss in loss.values())
+
     def on_fit_start(self, trainer):
         self.max_epochs = trainer.max_epochs
         self.calc_cos_sim = False
@@ -65,8 +76,8 @@ class Weighting:
     def on_train_epoch_end(self):
         pass
 
-    def manual_backward(self, loss):
-        loss["loss"].backward()
+    def manual_backward(self, losses):
+        losses["loss"].backward()
 
     def _compute_grad_dim(self):
         self.grad_index = []
@@ -178,6 +189,28 @@ class Static(Weighting):
 
     def weight_loss(self, losses: dict) -> dict:
         return {k: v * self.loss_weights[k] for k, v in losses.items()}
+
+
+class GLS(Weighting):
+    r"""Geometric Loss Strategy (GLS).
+
+    This method is proposed in
+    `MultiNet++: Multi-Stream Feature Aggregation and Geometric Loss Strategy for
+    Multi-Task Learning (CVPR 2019 workshop):
+      <https://arxiv.org/abs/1904.08492>`_ \
+    and implemented by us.
+
+    """
+
+    def __init__(self, task_names=None):
+        super().__init__(task_names=task_names, auto_opt=False)
+        self.alpha = dict.fromkeys(self.task_names, 1.0)
+
+    def total_loss(self, loss: dict, loss_mode: str = "GLS"):
+        return super().total_loss(loss, loss_mode)
+
+    def manual_backward(self, loss):
+        loss["loss"].backward()
 
 
 class RLW(Weighting):
@@ -797,3 +830,72 @@ class STCH(Weighting):
             loss.backward()
 
         self.alpha = {task: batch_weight[tn] for tn, task in enumerate(self.task_names)}
+
+
+class GradNorm(Weighting):
+    r"""Gradient Normalization (GradNorm).
+
+    Proposed in `GradNorm: Gradient Normalization for Adaptive Loss Balancing
+    in Deep Multitask Networks (ICML 2018):
+      <http://proceedings.mlr.press/v80/chen18a/chen18a.pdf>`_ \
+    and implemented by us.
+
+    Args:
+        alpha (float, default=1.5):
+            The strength of the restoring force which pulls tasks back to a common training rate.
+
+    """
+
+    def __init__(self, task_names=None, alpha=1.5):
+        super().__init__(task_names=task_names, auto_opt=False)
+        self._alpha = alpha
+
+        self.current_epoch = 0
+        self.loss_scale = nn.Parameter(torch.tensor([1.0] * self.task_num, device="cuda"))
+
+        self.avg_losses = {}
+        self.batch_losses = {}
+
+    def on_train_start(self):
+        self.train_loss_buffer = torch.zeros([6, self.max_epochs])
+
+    def on_train_batch_end(self, losses: dict):
+        for task_name, loss_item in losses.items():
+            if task_name not in self.batch_losses:
+                self.batch_losses[task_name] = []
+            self.batch_losses[task_name].append(loss_item.detach())
+
+    def weight_loss(self, losses: dict) -> dict:
+        # since we run weight_loss after the end of each batch, updating batch_losses here
+        #  is equivalent to calling on_train_batch_end() and updating there
+        for task_name, loss_item in losses.items():
+            if task_name not in self.batch_losses:
+                self.batch_losses[task_name] = []
+            self.batch_losses[task_name].append(loss_item.detach())
+        return losses
+
+    def on_train_epoch_end(self):
+        self.current_epoch += 1
+
+    def manual_backward(self, losses: dict):
+        if self.current_epoch >= 1:
+            loss_scale = self.task_num * F.softmax(self.loss_scale, dim=-1)
+            grads = self._get_grads(losses, mode="backward").to("cuda")
+
+            G_per_loss = torch.norm(loss_scale.unsqueeze(1) * grads, p=2, dim=-1)
+            G = G_per_loss.mean(0)
+            L_i = torch.Tensor([
+                losses[task].item() / self.train_loss_buffer[tn, 0]
+                for tn, task in enumerate(self.task_names)
+            ]).to("cuda")
+            r_i = L_i / L_i.mean()
+            constant_term = (G * (r_i**self._alpha)).detach()
+            self.new_grads = (G_per_loss - constant_term).abs()
+            L_grad = self.new_grads.sum(0)
+            L_grad.backward()
+            alpha = loss_scale.detach().clone()
+            self._backward_new_grads(alpha, grads=grads)
+            self.alpha = {task: alpha[tn] for tn, task in enumerate(self.task_names)}
+        else:
+            losses["loss"].backward()
+            self.alpha = {task: 1.0 for tn, task in enumerate(self.task_names)}
