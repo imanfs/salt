@@ -806,7 +806,7 @@ class STCH(Weighting):
 
     def manual_backward(self, losses_dict: dict):
         self.step += 1
-        losses = torch.stack(list(losses_dict.values()))
+        losses = torch.stack([losses_dict[task] for tn, task in enumerate(self.task_names)])
         batch_weight = np.ones(len(losses))
         if self.current_epoch < self.warmup_epoch:
             loss = torch.mul(torch.log(losses + 1e-20), torch.ones_like(losses).to("cuda")).sum()
