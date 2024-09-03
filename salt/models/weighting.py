@@ -794,8 +794,8 @@ class STCH(Weighting):
         self.step = 0
         self.nadir_vector = None  # None
 
-        self.average_loss_count = 0
-        self.average_loss = dict.fromkeys(self.task_names, 0.0)
+        self.avg_loss_ct = 0
+        self.avg_loss = dict.fromkeys(self.task_names, 0.0)
         self.loss_weights = dict.fromkeys(self.task_names, 1.0)
 
     def on_train_epoch_end(self):
@@ -810,23 +810,24 @@ class STCH(Weighting):
                 return sum(subloss for subloss in losses.values())
 
             if self.current_epoch == self.warmup_epoch:
-                losses = {task: torch.log(losses[task] + 1e-20) for task in self.task_names}
                 # Accumulate the detached losses
                 for key, loss in losses.items():
-                    self.average_loss[key] += loss.detach()
-                self.average_loss_count += 1
-                return sum(subloss for subloss in loss.values())
-
+                    print(loss)
+                    self.avg_loss[key] += loss.detach()
+                self.avg_loss_ct += 1
+                losses = {task: torch.log(losses[task] + 1e-20) for task in self.task_names}
+                return sum(subloss for subloss in losses.values())
             if self.nadir_vector is None:
-                self.nadir_vector = self.average_loss / self.average_loss_count
+                self.nadir_vector = {t: v / self.avg_loss_ct for t, v in self.avg_loss.items()}
+                print(self.nadir_vector)
 
             losses = {
                 task: torch.log(losses[task] / self.nadir_vector[task] + 1e-20)
                 for task in self.task_names
             }
-            max_term = max([losses[task].data.max().detach() for task in self.task_names])
-            reg_losses = {task: loss - max_term for task, loss in losses.items()}
 
+            max_term = max([losses[task].detach() for task in self.task_names])
+            reg_losses = {task: loss - max_term for task, loss in losses.items()}
             reg_losses = torch.stack(list(reg_losses.values()))
             return self.mu * torch.log(torch.sum(torch.exp(reg_losses / self.mu))) * self.task_num
         return super().total_loss(losses, loss_mode)
