@@ -13,53 +13,6 @@ def extract_MF_name(path, mf_only=False):
     return path.partition(prefix)[2].partition(suffix)[0]
 
 
-# sig_eff = np.linspace(0.49, 1, 20)
-# is_light = df["flavour_label"] == 2
-# is_c = df["flavour_label"] == 1
-# is_b = df["flavour_label"] == 0
-# n_jets_light = sum(is_light)
-# n_jets_c = sum(is_c)
-
-# def disc_fct(arr: np.ndarray, f_c: float = 0.018) -> np.ndarray:
-#     # note that here we need to list columns as u,c,b as opposed to how they appear
-#     # in the test set which is in order b,c,u
-#     return np.log(arr[2] / (f_c * arr[1] + (1 - f_c) * arr[0]))
-
-
-# def apply_discs(df, name):
-#     label = "GN2v00_" if "GN2" in name else f"MaskFormer_{name}"
-#     return np.apply_along_axis(
-#         disc_fct,
-#         1,
-#         df[[f"{label}_pu", f"{label}_pc", f"{label}_pb"]].values,
-#     )
-
-# def plt_roc(RocPlot, sig_eff, bkg_rej, n_test, rej_class, name, tags="", ref=None):
-#     name_label = name.capitalize() if "default" in name else name.upper()
-#     label = "GN2" if "GN2" in name else f"MF-{name_label}" + tags
-
-#     RocPlot.add_roc(
-#         Roc(
-#             sig_eff,
-#             bkg_rej,
-#             n_test=n_test,
-#             rej_class=rej_class,
-#             signal_class="bjets",
-#             label=label,
-#         ),
-#         reference=ref if ref is not None else name == "GN2",
-#     )
-
-
-# def get_roc_vars_and_plot(df, name, sig_eff, is_b, is_light, is_c, n_jets_light, n_jets_c):
-#     discs_gn2 = apply_discs(df, name)
-#     gn2_ujets_rej = calc_rej(discs_gn2[is_b], discs_gn2[is_light], sig_eff)
-#     gn2_cjets_rej = calc_rej(discs_gn2[is_b], discs_gn2[is_c], sig_eff)
-
-#     plt_roc(plot_roc, sig_eff, gn2_ujets_rej, n_jets_light, "ujets", name)
-#     plt_roc(plot_roc, sig_eff, gn2_cjets_rej, n_jets_c, "cjets", name)
-
-
 class ROCPlotter:
     def __init__(self, df, sig_eff=None):
         if sig_eff is None:
