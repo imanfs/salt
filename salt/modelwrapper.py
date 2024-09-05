@@ -113,7 +113,7 @@ class ModelWrapper(L.LightningModule):
         self.weighting = loss_weighting if loss_weighting else Static()
         self.weighting.set_model(self.model)
         # self.calc_cos_cim = self.weighting.calc_cos_sim # override to True if desired for auto opt
-        self.calc_cos_sim = False
+        self.calc_cos_sim = True
         self.automatic_optimization = self.weighting.auto_opt
         self.task_names = self.weighting.task_names
 

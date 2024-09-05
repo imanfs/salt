@@ -3,6 +3,7 @@ import pandas as pd
 from ftag.hdf5 import H5Reader
 from puma import Roc, RocPlot
 from puma.metrics import calc_rej
+from utils import load_file_paths
 
 
 def extract_MF_name(path, mf_only=False):
@@ -41,7 +42,7 @@ class ROCPlotter:
             self.df[[f"{label}_pu", f"{label}_pc", f"{label}_pb"]].values,
         )
 
-    def plt_roc(self, RocPlot, bkg_rej, n_test, rej_class, tags=""):
+    def plt_roc(self, RocPlot, bkg_rej, n_test, rej_class, tags="", colour=None):
         """Plot the ROC curve using the RocPlot object."""
         name_label = self.name.capitalize() if "default" in self.name else self.name.upper()
         label = "GN2" if "GN2" in self.name else f"MF-{name_label}" + tags
@@ -54,11 +55,12 @@ class ROCPlotter:
                 rej_class=rej_class,
                 signal_class="bjets",
                 label=label,
+                colour=colour,
             ),
             reference=self.ref if self.ref is not None else self.name == "GN2",
         )
 
-    def get_roc_vars_and_plot(self, RocPlot, name, ref=None):
+    def get_roc_vars_and_plot(self, RocPlot, name, ref=None, colour=None):
         """Calculate ROC variables and plot them."""
         self.name = name
         self.ref = ref
@@ -66,48 +68,19 @@ class ROCPlotter:
         ujets_rej = calc_rej(discs[self.is_b], discs[self.is_light], self.sig_eff)
         cjets_rej = calc_rej(discs[self.is_b], discs[self.is_c], self.sig_eff)
 
-        self.plt_roc(RocPlot, ujets_rej, self.n_jets_light, "ujets")
-        self.plt_roc(RocPlot, cjets_rej, self.n_jets_c, "cjets")
+        self.plt_roc(RocPlot, ujets_rej, self.n_jets_light, "ujets", colour=colour)
+        self.plt_roc(RocPlot, cjets_rej, self.n_jets_c, "cjets", colour=colour)
 
 
-fname_default = (
-    "/home/xucabis2/salt/logs/_final/MaskFormer_default_20240828-T113812/ckpts/"
-    "epoch=029-val_loss=0.64809__test_ttbar.h5"
-)
-fname_gls = (
-    "/home/xucabis2/salt/logs/_final/MaskFormer_GLS_20240902-T084826/ckpts/"
-    "epoch=029-val_loss=0.64470__test_ttbar.h5"
-)
-fname_uw = (
-    "/home/xucabis2/salt/logs/_final/MaskFormer_UW_20240901-T003519/ckpts/"
-    "epoch=029-val_loss=0.64037__test_ttbar.h5"
-)
-fname_dwa = (
-    "/home/xucabis2/salt/logs/_final/MaskFormer_DWA_20240901-T005936/ckpts/"
-    "epoch=029-val_loss=0.63966__test_ttbar.h5"
-)
-fname_rlw = (
-    "/home/xucabis2/salt/logs/_final/MaskFormer_RLW_20240826-T234255/ckpts/"
-    "epoch=029-val_loss=0.64060__test_ttbar.h5"
-)
-fname_stch = (
-    "/home/xucabis2/salt/logs/_final/MaskFormer_STCH_20240904-T023541/ckpts/"
-    "epoch=029-val_loss=0.64920__test_ttbar.h5"
-)
-
-fnames_preds = {
-    # fname_default: "",
-    fname_stch: "",
-    fname_gls: "",
-    fname_dwa: "",
-    fname_uw: "",
-    fname_rlw: "",
-}
+file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
+file_paths_dict = load_file_paths(file_path)
+fnames_preds = file_paths_dict.copy()  # Create a copy of the original dictionary
+fnames_preds.pop("fname_default", None)
 
 ref = "MF"
 
-reader = H5Reader(fname_default, batch_size=1_000)
-df = pd.DataFrame(
+reader = H5Reader(file_paths_dict["fname_default"], batch_size=1_000)
+df_default = pd.DataFrame(
     reader.load(
         {
             "jets": [
@@ -148,14 +121,15 @@ plot_roc = RocPlot(
 plot_roc.set_ratio_class(1, "ujets")
 plot_roc.set_ratio_class(2, "cjets")
 
-rocplotter = ROCPlotter(df)
+# sig_eff = np.linspace(0.59, 0.9, 20)
+sig_eff = np.linspace(0.49, 1, 20)
+rocplotter_default = ROCPlotter(df_default, sig_eff)
 
-rocplotter.get_roc_vars_and_plot(plot_roc_gn2, name="GN2")
-rocplotter.get_roc_vars_and_plot(plot_roc_gn2, "default", ref=False)
+# plot MF default first so they have the same colour
+rocplotter_default.get_roc_vars_and_plot(plot_roc_gn2, "default", ref=False)
+rocplotter_default.get_roc_vars_and_plot(plot_roc, "default", ref=True)
 
-rocplotter.get_roc_vars_and_plot(plot_roc, "default", ref=True)
-
-for fname in fnames_preds:
+for fname in fnames_preds.values():
     mf_name = extract_MF_name(fname)
     reader = H5Reader(fname, batch_size=1_000)
     df = pd.DataFrame(
@@ -173,21 +147,27 @@ for fname in fnames_preds:
             num_jets=500_000,
         )["jets"]
     )
-    rocplotter = ROCPlotter(df)
+    rocplotter = ROCPlotter(df, sig_eff)
+    # MF comparison plots
     rocplotter.get_roc_vars_and_plot(plot_roc_gn2, mf_name, ref=False)
     rocplotter.get_roc_vars_and_plot(plot_roc, mf_name, ref=False)
-    # MF comparison plots
 
-plot_dir = "/home/xucabis2/salt/iman/plots/final"
+# plot gn2 last
+rocplotter_default.get_roc_vars_and_plot(plot_roc_gn2, name="GN2", ref=True)
+
+plot_dir = "/home/xucabis2/salt/iman/plots/figs"
 weighting = "lossbased"
 
 plot_roc_gn2.draw()
-plot_name = f"{plot_dir}/roc_{weighting}_GN2ref.png"
+
+range_str = "" if sig_eff[0] == 0.49 and sig_eff[-1] == 1 else f"_{sig_eff[0]}_{sig_eff[-1]}"
+
+plot_name = f"{plot_dir}/roc_{weighting}_GN2ref{range_str}.png"
 print("Saving to ", plot_name)
 plot_roc_gn2.savefig(plot_name, transparent=False)
 
 
 plot_roc.draw()
-plot_name = f"{plot_dir}/roc_{weighting}_MFref.png"
+plot_name = f"{plot_dir}/roc_{weighting}_MFref{range_str}.png"
 print("Saving to ", plot_name)
 plot_roc.savefig(plot_name, transparent=False)

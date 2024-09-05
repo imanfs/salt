@@ -3,6 +3,20 @@ import numpy as np
 from puma.hlplots import Tagger
 
 
+def load_file_paths(file_path):
+    """Reads the file paths from a text file and returns them as a dictionary."""
+    file_paths = {}
+
+    with open(file_path) as f:
+        for line in f:
+            cleaned_line = line.strip()
+            if cleaned_line:  # Skip empty lines
+                key, value = cleaned_line.split("=", 1)  # Split each line into key and value
+                file_paths[key.strip()] = value.strip()
+
+    return file_paths
+
+
 def h5py_read(h5path, key, dataset=None, var_name=None):
     h5 = h5py.File(h5path, "r")
     # Iterate over items in the file

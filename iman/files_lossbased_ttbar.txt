@@ -1,0 +1,6 @@
+fname_default=/home/xucabis2/salt/logs/_final/MaskFormer_default_20240828-T113812/ckpts/epoch=029-val_loss=0.64809__test_ttbar.h5
+fname_gls=/home/xucabis2/salt/logs/_final/MaskFormer_GLS_20240902-T084826/ckpts/epoch=029-val_loss=0.64470__test_ttbar.h5
+fname_uw=/home/xucabis2/salt/logs/_final/MaskFormer_UW_20240901-T003519/ckpts/epoch=029-val_loss=0.64037__test_ttbar.h5
+fname_dwa=/home/xucabis2/salt/logs/_final/MaskFormer_DWA_20240901-T005936/ckpts/epoch=029-val_loss=0.63966__test_ttbar.h5
+fname_rlw=/home/xucabis2/salt/logs/_final/MaskFormer_RLW_20240826-T234255/ckpts/epoch=029-val_loss=0.64060__test_ttbar.h5
+fname_stch=/home/xucabis2/salt/logs/_final/MaskFormer_STCH_20240904-T023541/ckpts/epoch=029-val_loss=0.64920__test_ttbar.h5
