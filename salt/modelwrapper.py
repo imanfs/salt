@@ -332,6 +332,12 @@ class ModelWrapper(L.LightningModule):
     def on_train_epoch_start(self):
         self.weighting.on_train_epoch_start()
 
+    def on_train_batch_end(self):
+        self.weighting.on_train_batch_end()
+
+    def on_after_backward(self):
+        self.weighting.on_after_backward()
+
     def on_train_epoch_end(self):
         self.weighting.on_train_epoch_end()
 

@@ -74,6 +74,12 @@ class Weighting:
     def on_train_epoch_start(self):
         pass
 
+    def on_train_batch_end(self):
+        pass
+
+    def on_after_backward(self):
+        pass
+
     def on_train_epoch_end(self):
         pass
 
@@ -251,13 +257,15 @@ class DWA(Weighting):
     def on_train_start(self):
         self.train_loss_buffer = torch.zeros([6, self.max_epochs])
 
-    def on_train_batch_end(self, losses: dict):
+    def weight_loss(self, losses: dict) -> dict:
+        # since we run weight_loss at the "out" part of the train step
+        # updating batch_losses here is somewhat equivalent to recording batch losses
+        # at "end" of batch for our use cases
         for task_name, loss_item in losses.items():
             if task_name not in self.batch_losses:
                 self.batch_losses[task_name] = []
             self.batch_losses[task_name].append(loss_item.detach())
 
-    def weight_loss(self, losses: dict) -> dict:
         if self.current_epoch > 1:
             w_i = torch.Tensor(
                 self.train_loss_buffer[:, self.current_epoch - 1]
@@ -866,11 +874,15 @@ class GradNorm(Weighting):
     def on_train_start(self):
         self.train_loss_buffer = torch.zeros([6, self.max_epochs])
 
-    def on_train_batch_end(self, losses: dict):
+    def weight_loss(self, losses: dict):
+        # since we run weight_loss at the "out" part of the train step
+        # updating batch_losses here is somewhat equivalent to recording batch losses
+        # at "end" of batch for our use cases
         for task_name, loss_item in losses.items():
             if task_name not in self.batch_losses:
                 self.batch_losses[task_name] = []
             self.batch_losses[task_name].append(loss_item.detach())
+        return losses
 
     def on_train_epoch_end(self):
         for task_name, losses in self.batch_losses.items():
@@ -1042,3 +1054,49 @@ class MGDA(Weighting):
             raise ValueError(f"No support normalization type {ntype} for MGDA")
 
         return grads / gn.unsqueeze(1).repeat(1, grads.size()[1])
+
+
+class FAMO(Weighting):
+    """Fast Adaptive Multitask Optimization."""
+
+    def __init__(
+        self,
+        task_names=None,
+        gamma: float = 0.01,  # the regularization coefficient
+        w_lr: float = 0.025,  # the learning rate of the task logits
+        max_norm: float = 1.0,  # the maximum gradient norm
+    ):
+        super().__init__(task_names=task_names, auto_opt=True)
+        self.min_losses = torch.zeros(self.task_num).to("cuda")
+        self.w = torch.tensor([0.0] * self.task_num, device="cuda", requires_grad=True)
+        self.w_opt = torch.optim.Adam([self.w], lr=w_lr, weight_decay=gamma)
+        self.max_norm = max_norm
+
+    def weight_loss(self, losses):
+        self.prev_loss = torch.stack([losses[task] for task in self.task_names])
+        z = F.softmax(self.w, -1)
+        D = losses - self.min_losses + 1e-8
+        c = (z / D).sum().detach()
+        return D.log() * z / c
+
+    def update_weights(self, curr_loss):
+        curr_loss = torch.stack([curr_loss[task] for task in self.task_names])
+        delta = (self.prev_loss - self.min_losses + 1e-8).log() - (
+            curr_loss - self.min_losses + 1e-8
+        ).log()
+        with torch.enable_grad():
+            d = torch.autograd.grad(F.softmax(self.w, -1), self.w, grad_outputs=delta.detach())[0]
+        self.w_opt.zero_grad()
+        self.w.grad = d
+        self.w_opt.step()
+
+    def on_after_backward(self):
+        if self.max_norm > 0 and self.model.parameters() is not None:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_norm)
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):  # noqa: ARG002
+        inputs, pad_masks, labels = batch
+        x = self.norm(inputs)
+        with torch.no_grad():
+            _, new_loss = self.model(x, pad_masks, labels)
+            self.update_weights(new_loss)
