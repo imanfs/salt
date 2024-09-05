@@ -1074,10 +1074,11 @@ class FAMO(Weighting):
 
     def weight_loss(self, losses):
         self.prev_loss = torch.stack([losses[task] for task in self.task_names])
-        z = F.softmax(self.w, -1)
-        D = losses - self.min_losses + 1e-8
-        c = (z / D).sum().detach()
-        return D.log() * z / c
+        self.z = F.softmax(self.w, -1)
+        D = self.prev_loss - self.min_losses + 1e-8
+        self.c = (self.z / D).sum().detach()
+        self.loss_weights = {task: self.z[tn] / self.c for tn, task in enumerate(self.task_names)}
+        return {task: D[tn].log() * self.z[tn] / self.c for tn, task in enumerate(self.task_names)}
 
     def update_weights(self, curr_loss):
         curr_loss = torch.stack([curr_loss[task] for task in self.task_names])
@@ -1094,9 +1095,9 @@ class FAMO(Weighting):
         if self.max_norm > 0 and self.model.parameters() is not None:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_norm)
 
-    def on_train_batch_end(self, outputs, batch, batch_idx):  # noqa: ARG002
+    def on_train_batch_end(self, batch):
         inputs, pad_masks, labels = batch
-        x = self.norm(inputs)
+        x = self.input_norm(inputs)
         with torch.no_grad():
             _, new_loss = self.model(x, pad_masks, labels)
             self.update_weights(new_loss)

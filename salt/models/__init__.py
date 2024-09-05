@@ -33,6 +33,7 @@ from salt.models.transformer_v2 import TransformerV2
 from salt.models.weighting import (
     DBMTL,
     DWA,
+    FAMO,
     GLS,
     IMTL,
     MGDA,
@@ -54,6 +55,7 @@ from salt.models.weighting import (
 __all__ = [
     "DBMTL",
     "DWA",
+    "FAMO",
     "GLS",
     "IMTL",
     "MGDA",
