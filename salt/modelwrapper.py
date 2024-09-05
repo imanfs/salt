@@ -111,26 +111,10 @@ class ModelWrapper(L.LightningModule):
             ), "GLS does not utilise task weights - remove all/set to 1"
 
         self.weighting = loss_weighting if loss_weighting else Static()
-        self.weighting.set_model(self.model)
+        self.weighting.set_model_and_input_norm(self.model, self.norm)
         # self.calc_cos_cim = self.weighting.calc_cos_sim # override to True if desired for auto opt
         self.calc_cos_sim = True
         self.automatic_optimization = self.weighting.auto_opt
-        self.task_names = self.weighting.task_names
-
-    def on_fit_start(self):
-        self.weighting.on_fit_start(trainer=self.trainer)
-
-    def on_train_start(self):
-        self.weighting.on_train_start()
-
-    def on_train_epoch_start(self):
-        self.weighting.on_train_epoch_start()
-
-    def on_train_epoch_end(self):
-        self.weighting.on_train_epoch_end()
-
-    def manual_backward(self, loss):
-        self.weighting.manual_backward(loss)
 
     def total_loss(self, loss: dict):
         """Computes the final loss based on the loss mode."""
@@ -195,7 +179,7 @@ class ModelWrapper(L.LightningModule):
             return preds, labels, pad_masks, None
 
         # compute total loss
-        # loss["loss"] = self.total_loss(loss) ## i weight them in the train step
+        # loss["loss"] = self.total_loss(loss) ## i weight them then combine in the train step
 
         return preds, labels, pad_masks, loss
 
@@ -221,7 +205,7 @@ class ModelWrapper(L.LightningModule):
     def log_grads(self, grads):
         kwargs = {"sync_dist": len(self.trainer.device_ids) > 1}
         if not isinstance(grads, dict):
-            grads = {task: grads[tn] for tn, task in enumerate(self.task_names)}
+            grads = {task: grads[tn] for tn, task in enumerate(self.weighting.task_names)}
         for t, grad in grads.items():
             n = f"{t}_grad"
             L1_norm = torch.norm(grad, p=1)
@@ -276,6 +260,7 @@ class ModelWrapper(L.LightningModule):
             if self.calc_cos_sim:
                 # log transformed gradients from weighting methods (calculated in weighting class)
                 self.log_grads(self.weighting.new_grads)
+
                 # log cos similarities
                 self.weighting.compute_pairwise_cossim(self.weighting.new_grads)
                 self.log_cossim(self.weighting.task_pairs, self.weighting.cos_sims)
@@ -337,3 +322,18 @@ class ModelWrapper(L.LightningModule):
     @property
     def input_dims(self) -> dict[str, int]:
         return {k: len(v) for k, v in self.norm.variables.items()}
+
+    def on_fit_start(self):
+        self.weighting.on_fit_start(trainer=self.trainer)
+
+    def on_train_start(self):
+        self.weighting.on_train_start()
+
+    def on_train_epoch_start(self):
+        self.weighting.on_train_epoch_start()
+
+    def on_train_epoch_end(self):
+        self.weighting.on_train_epoch_end()
+
+    def manual_backward(self, loss):
+        self.weighting.manual_backward(loss)

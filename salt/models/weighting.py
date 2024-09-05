@@ -39,9 +39,10 @@ class Weighting:
             f"Model is being trained with {self.name} weighting."
         )
 
-    def set_model(self, model: nn.Module):
+    def set_model_and_input_norm(self, model: nn.Module, input_norm: nn.Module):
         """Sets the model for parameter access."""
         self.model = model
+        self.input_norm = input_norm
 
     def weight_loss(self, losses: dict):
         """Weights the losses based on the weighting method."""
@@ -257,13 +258,6 @@ class DWA(Weighting):
             self.batch_losses[task_name].append(loss_item.detach())
 
     def weight_loss(self, losses: dict) -> dict:
-        # since we run weight_loss after the end of each batch, updating batch_losses here
-        #  is equivalent to calling on_train_batch_end() and updating there
-        for task_name, loss_item in losses.items():
-            if task_name not in self.batch_losses:
-                self.batch_losses[task_name] = []
-            self.batch_losses[task_name].append(loss_item.detach())
-
         if self.current_epoch > 1:
             w_i = torch.Tensor(
                 self.train_loss_buffer[:, self.current_epoch - 1]
@@ -281,8 +275,9 @@ class DWA(Weighting):
     def on_train_epoch_end(self):
         for task_name, losses in self.batch_losses.items():
             if self.avg_losses.get(task_name) is None:
-                self.avg_losses[task_name] = torch.zeros(len(self.train_loss_buffer[0]))
+                self.avg_losses[task_name] = torch.zeros(self.task_num)
             self.avg_losses[task_name][self.current_epoch] = sum(losses) / len(losses)
+
         for task_idx, task_name in enumerate(self.batch_losses.keys()):
             self.train_loss_buffer[task_idx, self.current_epoch] = self.avg_losses[task_name][
                 self.current_epoch
@@ -877,16 +872,16 @@ class GradNorm(Weighting):
                 self.batch_losses[task_name] = []
             self.batch_losses[task_name].append(loss_item.detach())
 
-    def weight_loss(self, losses: dict) -> dict:
-        # since we run weight_loss after the end of each batch, updating batch_losses here
-        #  is equivalent to calling on_train_batch_end() and updating there
-        for task_name, loss_item in losses.items():
-            if task_name not in self.batch_losses:
-                self.batch_losses[task_name] = []
-            self.batch_losses[task_name].append(loss_item.detach())
-        return losses
-
     def on_train_epoch_end(self):
+        for task_name, losses in self.batch_losses.items():
+            if self.avg_losses.get(task_name) is None:
+                self.avg_losses[task_name] = torch.zeros(self.task_num)
+            self.avg_losses[task_name][self.current_epoch] = sum(losses) / len(losses)
+
+        for task_idx, task_name in enumerate(self.batch_losses.keys()):
+            self.train_loss_buffer[task_idx, self.current_epoch] = self.avg_losses[task_name][
+                self.current_epoch
+            ]
         self.current_epoch += 1
 
     def manual_backward(self, losses: dict):
