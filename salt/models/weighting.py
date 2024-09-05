@@ -230,8 +230,8 @@ class RLW(Weighting):
         super().__init__(task_names=task_names, auto_opt=True)
 
     def weight_loss(self, losses: dict) -> dict:
-        weights = F.softmax(torch.randn(self.task_num), dim=-1)
-        return {k: v * weights[i] for i, (k, v) in enumerate(losses.items())}
+        self.loss_weights = F.softmax(torch.randn(self.task_num), dim=-1)
+        return {k: v * self.loss_weights[i] for i, (k, v) in enumerate(losses.items())}
 
 
 class DWA(Weighting):
