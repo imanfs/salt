@@ -74,7 +74,7 @@ class Weighting:
     def on_train_epoch_start(self):
         pass
 
-    def on_train_batch_end(self):
+    def on_train_batch_end(self, batch):
         pass
 
     def on_after_backward(self):

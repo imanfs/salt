@@ -53,11 +53,10 @@ def mask_ce_loss(inputs: Tensor, labels: Tensor):
     Tensor
         Single-element loss tensor
     """
-    # epsilon = -1
-    # pt = labels * F.softmax(inputs, dim=-1)  # , dim = -1
-    # CE = F.binary_cross_entropy_with_logits(inputs, labels, reduction="none")
-    # loss = CE + epsilon * (1 - pt)
-    loss = F.binary_cross_entropy_with_logits(inputs, labels, reduction="none")
+    epsilon = -1
+    pt = labels * F.softmax(inputs, dim=-1)  # , dim = -1
+    CE = F.binary_cross_entropy_with_logits(inputs, labels, reduction="none")
+    loss = CE + epsilon * (1 - pt)
     # find the mean loss for each mask
     loss = loss.mean(1)
 
@@ -99,7 +98,7 @@ def sigmoid_focal_loss(inputs: Tensor, targets: Tensor, alpha: float = -1, gamma
     return loss.mean(1).sum() / len(inputs)
 
 
-class MaskFormerLossIman(nn.Module):
+class MaskFormerLossPoly(nn.Module):
     """Compute the loss of MaskFormer, based on DETR.
 
     The process happens in two steps:
