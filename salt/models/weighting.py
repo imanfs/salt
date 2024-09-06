@@ -317,6 +317,136 @@ class UW(Weighting):
         }
 
 
+class STCH(Weighting):
+    """Smooth Tchebycheff Scalarization (STCH).
+
+    Proposed in Smooth Tchebycheff Scalarization for Multi-Objective Optimization:
+      <https://arxiv.org/pdf/2402.19078>
+    and implemented in the LibMTL framework by the authors:
+      <https://github.com/Xi-L/STCH>.
+
+    """
+
+    def __init__(self, task_names=None, mu=1.0, warmup_epoch=4):
+        super().__init__(task_names=task_names, auto_opt=True)
+
+        self.mu = mu
+        self.warmup_epoch = warmup_epoch
+
+        self.current_epoch = 0
+        self.step = 0
+        self.nadir_vector = None  # None
+
+        self.avg_loss_ct = 0
+        # self.avg_loss = 0
+        self.avg_loss = dict.fromkeys(self.task_names, 0.0)
+        self.loss_weights = dict.fromkeys(self.task_names, 1.0)
+        self.alpha = self.loss_weights
+
+    def on_train_epoch_end(self):
+        self.current_epoch += 1
+
+    def total_loss(self, losses: dict, loss_mode: str = "STCH"):
+        if loss_mode == "STCH":
+            self.step += 1
+            if self.current_epoch < self.warmup_epoch:
+                losses = {task: torch.log(losses[task] + 1e-20) for task in self.task_names}
+                return sum(subloss for subloss in losses.values())
+
+            if self.current_epoch == self.warmup_epoch:
+                # Accumulate the detached losses
+                for key, loss in losses.items():
+                    self.avg_loss[key] += loss.detach()
+                self.avg_loss_ct += 1
+                losses = {task: torch.log(losses[task] + 1e-20) for task in self.task_names}
+                return sum(subloss for subloss in losses.values())
+
+            if self.nadir_vector is None:
+                self.nadir_vector = {t: v / self.avg_loss_ct for t, v in self.avg_loss.items()}
+
+            losses = {
+                task: torch.log(losses[task] / self.nadir_vector[task] + 1e-20)
+                for task in self.task_names
+            }
+
+            max_term = max([losses[task].detach() for task in self.task_names])
+            reg_losses = {task: loss - max_term for task, loss in losses.items()}
+            reg_losses = torch.stack(list(reg_losses.values()))
+            return self.mu * torch.log(torch.sum(torch.exp(reg_losses / self.mu))) * self.task_num
+        return super().total_loss(losses, loss_mode)
+
+    # def total_loss(self, losses_dict: dict, loss_mode: str = "STCH"):
+    #     if loss_mode == "STCH":
+    #         self.step += 1
+    #         losses = torch.stack([losses_dict[task] for tn, task in enumerate(self.task_names)])
+
+    #         if self.current_epoch < self.warmup_epoch:
+    #             loss = torch.mul(torch.log(losses + 1e-20), torch.ones_like(losses).to("cuda"))
+    #             return loss.sum()
+
+    #         if self.current_epoch == self.warmup_epoch:
+    #             self.avg_loss += losses.detach()
+    #             self.avg_loss_ct += 1
+    #             loss = torch.mul(torch.log(losses + 1e-20), torch.ones_like(losses).to("cuda"))
+    #             return loss.sum()
+
+    #         if self.nadir_vector is None:
+    #             self.nadir_vector = self.avg_loss / self.avg_loss_ct
+
+    #         losses = torch.log(losses / self.nadir_vector + 1e-20)
+    #         max_term = torch.max(losses.data).detach()
+    #         reg_losses = losses - max_term
+    #         return self.mu * torch.log(torch.sum(torch.exp(reg_losses / self.mu))) * self.task_num
+    #     return super().total_loss(losses_dict, loss_mode)
+
+
+class FAMO(Weighting):
+    """Fast Adaptive Multitask Optimization."""
+
+    def __init__(
+        self,
+        task_names=None,
+        gamma: float = 0.01,  # the regularization coefficient
+        w_lr: float = 0.025,  # the learning rate of the task logits
+        max_norm: float = 1.0,  # the maximum gradient norm
+    ):
+        super().__init__(task_names=task_names, auto_opt=True)
+        self.min_losses = torch.zeros(self.task_num).to("cuda")
+        self.w = torch.tensor([0.0] * self.task_num, device="cuda", requires_grad=True)
+        self.w_opt = torch.optim.Adam([self.w], lr=w_lr, weight_decay=gamma)
+        self.max_norm = max_norm
+
+    def weight_loss(self, losses):
+        self.prev_loss = torch.stack([losses[task] for task in self.task_names])
+        self.z = F.softmax(self.w, -1)
+        D = self.prev_loss - self.min_losses + 1e-8
+        self.c = (self.z / D).sum().detach()
+        self.loss_weights = {task: self.z[tn] / self.c for tn, task in enumerate(self.task_names)}
+        return {task: D[tn].log() * self.z[tn] / self.c for tn, task in enumerate(self.task_names)}
+
+    def update_weights(self, curr_loss):
+        curr_loss = torch.stack([curr_loss[task] for task in self.task_names])
+        delta = (self.prev_loss - self.min_losses + 1e-8).log() - (
+            curr_loss - self.min_losses + 1e-8
+        ).log()
+        with torch.enable_grad():
+            d = torch.autograd.grad(F.softmax(self.w, -1), self.w, grad_outputs=delta.detach())[0]
+        self.w_opt.zero_grad()
+        self.w.grad = d
+        self.w_opt.step()
+
+    def on_after_backward(self):
+        if self.max_norm > 0 and self.model.parameters() is not None:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_norm)
+
+    def on_train_batch_end(self, batch):
+        inputs, pad_masks, labels = batch
+        x = self.input_norm(inputs)
+        with torch.no_grad():
+            _, new_loss = self.model(x, pad_masks, labels)
+            self.update_weights(new_loss)
+
+
 class IMTL(Weighting):
     """Impartial Multi-task Learning (IMTL).
 
@@ -765,89 +895,6 @@ class GradVac(Weighting):
         self.rho_T = torch.zeros(self.task_num, self.task_num, len(self.k_idx)).to("cuda")
 
 
-class STCH(Weighting):
-    """Smooth Tchebycheff Scalarization (STCH).
-
-    Proposed in Smooth Tchebycheff Scalarization for Multi-Objective Optimization:
-      <https://arxiv.org/pdf/2402.19078>
-    and implemented in the LibMTL framework by the authors:
-      <https://github.com/Xi-L/STCH>.
-
-    """
-
-    def __init__(self, task_names=None, mu=1.0, warmup_epoch=4):
-        super().__init__(task_names=task_names, auto_opt=True)
-
-        self.mu = mu
-        self.warmup_epoch = warmup_epoch
-
-        self.current_epoch = 0
-        self.step = 0
-        self.nadir_vector = None  # None
-
-        self.avg_loss_ct = 0
-        # self.avg_loss = 0
-        self.avg_loss = dict.fromkeys(self.task_names, 0.0)
-        self.loss_weights = dict.fromkeys(self.task_names, 1.0)
-        self.alpha = self.loss_weights
-
-    def on_train_epoch_end(self):
-        self.current_epoch += 1
-
-    def total_loss(self, losses: dict, loss_mode: str = "STCH"):
-        if loss_mode == "STCH":
-            self.step += 1
-            if self.current_epoch < self.warmup_epoch:
-                losses = {task: torch.log(losses[task] + 1e-20) for task in self.task_names}
-                return sum(subloss for subloss in losses.values())
-
-            if self.current_epoch == self.warmup_epoch:
-                # Accumulate the detached losses
-                for key, loss in losses.items():
-                    self.avg_loss[key] += loss.detach()
-                self.avg_loss_ct += 1
-                losses = {task: torch.log(losses[task] + 1e-20) for task in self.task_names}
-                return sum(subloss for subloss in losses.values())
-
-            if self.nadir_vector is None:
-                self.nadir_vector = {t: v / self.avg_loss_ct for t, v in self.avg_loss.items()}
-
-            losses = {
-                task: torch.log(losses[task] / self.nadir_vector[task] + 1e-20)
-                for task in self.task_names
-            }
-
-            max_term = max([losses[task].detach() for task in self.task_names])
-            reg_losses = {task: loss - max_term for task, loss in losses.items()}
-            reg_losses = torch.stack(list(reg_losses.values()))
-            return self.mu * torch.log(torch.sum(torch.exp(reg_losses / self.mu))) * self.task_num
-        return super().total_loss(losses, loss_mode)
-
-    # def total_loss(self, losses_dict: dict, loss_mode: str = "STCH"):
-    #     if loss_mode == "STCH":
-    #         self.step += 1
-    #         losses = torch.stack([losses_dict[task] for tn, task in enumerate(self.task_names)])
-
-    #         if self.current_epoch < self.warmup_epoch:
-    #             loss = torch.mul(torch.log(losses + 1e-20), torch.ones_like(losses).to("cuda"))
-    #             return loss.sum()
-
-    #         if self.current_epoch == self.warmup_epoch:
-    #             self.avg_loss += losses.detach()
-    #             self.avg_loss_ct += 1
-    #             loss = torch.mul(torch.log(losses + 1e-20), torch.ones_like(losses).to("cuda"))
-    #             return loss.sum()
-
-    #         if self.nadir_vector is None:
-    #             self.nadir_vector = self.avg_loss / self.avg_loss_ct
-
-    #         losses = torch.log(losses / self.nadir_vector + 1e-20)
-    #         max_term = torch.max(losses.data).detach()
-    #         reg_losses = losses - max_term
-    #         return self.mu * torch.log(torch.sum(torch.exp(reg_losses / self.mu))) * self.task_num
-    #     return super().total_loss(losses_dict, loss_mode)
-
-
 class GradNorm(Weighting):
     r"""Gradient Normalization (GradNorm).
 
@@ -1055,50 +1102,3 @@ class MGDA(Weighting):
             raise ValueError(f"No support normalization type {ntype} for MGDA")
 
         return grads / gn.unsqueeze(1).repeat(1, grads.size()[1])
-
-
-class FAMO(Weighting):
-    """Fast Adaptive Multitask Optimization."""
-
-    def __init__(
-        self,
-        task_names=None,
-        gamma: float = 0.01,  # the regularization coefficient
-        w_lr: float = 0.025,  # the learning rate of the task logits
-        max_norm: float = 1.0,  # the maximum gradient norm
-    ):
-        super().__init__(task_names=task_names, auto_opt=True)
-        self.min_losses = torch.zeros(self.task_num).to("cuda")
-        self.w = torch.tensor([0.0] * self.task_num, device="cuda", requires_grad=True)
-        self.w_opt = torch.optim.Adam([self.w], lr=w_lr, weight_decay=gamma)
-        self.max_norm = max_norm
-
-    def weight_loss(self, losses):
-        self.prev_loss = torch.stack([losses[task] for task in self.task_names])
-        self.z = F.softmax(self.w, -1)
-        D = self.prev_loss - self.min_losses + 1e-8
-        self.c = (self.z / D).sum().detach()
-        self.loss_weights = {task: self.z[tn] / self.c for tn, task in enumerate(self.task_names)}
-        return {task: D[tn].log() * self.z[tn] / self.c for tn, task in enumerate(self.task_names)}
-
-    def update_weights(self, curr_loss):
-        curr_loss = torch.stack([curr_loss[task] for task in self.task_names])
-        delta = (self.prev_loss - self.min_losses + 1e-8).log() - (
-            curr_loss - self.min_losses + 1e-8
-        ).log()
-        with torch.enable_grad():
-            d = torch.autograd.grad(F.softmax(self.w, -1), self.w, grad_outputs=delta.detach())[0]
-        self.w_opt.zero_grad()
-        self.w.grad = d
-        self.w_opt.step()
-
-    def on_after_backward(self):
-        if self.max_norm > 0 and self.model.parameters() is not None:
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_norm)
-
-    def on_train_batch_end(self, batch):
-        inputs, pad_masks, labels = batch
-        x = self.input_norm(inputs)
-        with torch.no_grad():
-            _, new_loss = self.model(x, pad_masks, labels)
-            self.update_weights(new_loss)

@@ -137,7 +137,7 @@ model:
                 label: ftagTruthOriginLabel
                 weight: 1.0
                 loss:
-                  class_path: torch.nn.CrossEntropyLoss
+                  class_path: salt.models.poly_loss.PolyLoss
                   init_args:
                     weight: [4.2, 73.7, 1.0, 17.5, 12.3, 12.5, 141.7, 22.3]
                 dense_config:
