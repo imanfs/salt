@@ -284,7 +284,7 @@ class DWA(Weighting):
     def on_train_epoch_end(self):
         for task_name, losses in self.batch_losses.items():
             if self.avg_losses.get(task_name) is None:
-                self.avg_losses[task_name] = torch.zeros(self.task_num)
+                self.avg_losses[task_name] = torch.zeros(self.max_epochs)
             self.avg_losses[task_name][self.current_epoch] = sum(losses) / len(losses)
 
         for task_idx, task_name in enumerate(self.batch_losses.keys()):
