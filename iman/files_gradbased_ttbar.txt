@@ -1,0 +1,7 @@
+Default=/home/xucabis2/salt/logs/_final/MaskFormer_default_20240828-T113812/ckpts/epoch=029-val_loss=0.64809__test_ttbar.h5
+
+AlignedMTL=/home/xzcappon/phd/projects/supervising/2023_2024/iman/saved_models/MaskFormer_AlignedMTL_20240903-T152849/ckpts/epoch=028-val_loss=0.63910__test_ttbar__.h5
+CAGrad=/home/xzcappon/phd/projects/supervising/2023_2024/iman/saved_models/MaskFormer_CAGrad_20240903-T152853/ckpts/epoch=029-val_loss=0.63875__test_ttbar__.h5
+GradNorm=/home/xzcappon/phd/projects/supervising/2023_2024/iman/saved_models/MaskFormer_GradNorm_20240903-T152853/ckpts/epoch=029-val_loss=0.64021__test_ttbar__.h5
+NashMTL=/home/xzcappon/phd/projects/supervising/2023_2024/iman/saved_models/MaskFormer_NashMTL_20240903-T152853/ckpts/epoch=029-val_loss=0.63757__test_ttbar__.h5
+PCGrad=/home/xzcappon/phd/projects/supervising/2023_2024/iman/saved_models/MaskFormer_PCGrad_20240903-T152853/ckpts/epoch=029-val_loss=0.63856__test_ttbar__.h5

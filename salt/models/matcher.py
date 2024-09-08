@@ -1,3 +1,4 @@
+import numpy as np
 import scipy
 import torch
 import torch.nn.functional as F
@@ -196,6 +197,7 @@ class HungarianMatcher(nn.Module):
         return idxs
 
     def lap(self, cost):
+        cost[np.isnan(cost) | np.isnan(cost)] = 0.0
         src_idx, tgt_idx = scipy.optimize.linear_sum_assignment(cost)
         idx = src_idx[tgt_idx]
         idx = list(idx) + sorted(self.default_idx - set(idx))

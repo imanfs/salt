@@ -44,8 +44,9 @@ class ROCPlotter:
 
     def plt_roc(self, RocPlot, bkg_rej, n_test, rej_class, tags="", colour=None):
         """Plot the ROC curve using the RocPlot object."""
-        name_label = self.name.capitalize() if "default" in self.name else self.name.upper()
-        label = "GN2" if "GN2" in self.name else f"MF-{name_label}" + tags
+        if self.label is None:
+            self.label = self.name.capitalize() if "default" in self.name else self.name.upper()
+        label = "GN2" if "GN2" in self.name else f"MF-{self.label}" + tags
 
         RocPlot.add_roc(
             Roc(
@@ -60,9 +61,10 @@ class ROCPlotter:
             reference=self.ref if self.ref is not None else self.name == "GN2",
         )
 
-    def get_roc_vars_and_plot(self, RocPlot, name, ref=None, colour=None):
+    def get_roc_vars_and_plot(self, RocPlot, name, label=None, ref=None, colour=None):
         """Calculate ROC variables and plot them."""
         self.name = name
+        self.label = label
         self.ref = ref
         discs = self.apply_discs()
         ujets_rej = calc_rej(discs[self.is_b], discs[self.is_light], self.sig_eff)
@@ -72,14 +74,16 @@ class ROCPlotter:
         self.plt_roc(RocPlot, cjets_rej, self.n_jets_c, "cjets", colour=colour)
 
 
-file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
+# file_path = "/home/xucabis2/salt/iman/files_gradbased_ttbar.txt"
+# file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
+file_path = "/home/xucabis2/salt/iman/files_polyloss_ttbar.txt"
 file_paths_dict = load_file_paths(file_path)
 fnames_preds = file_paths_dict.copy()  # Create a copy of the original dictionary
-fnames_preds.pop("fname_default", None)
+fnames_preds.pop("Default", None)
 
 ref = "MF"
 
-reader = H5Reader(file_paths_dict["fname_default"], batch_size=1_000)
+reader = H5Reader(file_paths_dict["Default"], batch_size=1_000)
 df_default = pd.DataFrame(
     reader.load(
         {
@@ -129,7 +133,7 @@ rocplotter_default = ROCPlotter(df_default, sig_eff)
 rocplotter_default.get_roc_vars_and_plot(plot_roc_gn2, "default", ref=False)
 rocplotter_default.get_roc_vars_and_plot(plot_roc, "default", ref=True)
 
-for fname in fnames_preds.values():
+for label, fname in fnames_preds.items():
     mf_name = extract_MF_name(fname)
     reader = H5Reader(fname, batch_size=1_000)
     df = pd.DataFrame(
@@ -149,14 +153,22 @@ for fname in fnames_preds.values():
     )
     rocplotter = ROCPlotter(df, sig_eff)
     # MF comparison plots
-    rocplotter.get_roc_vars_and_plot(plot_roc_gn2, mf_name, ref=False)
-    rocplotter.get_roc_vars_and_plot(plot_roc, mf_name, ref=False)
+    rocplotter.get_roc_vars_and_plot(plot_roc_gn2, mf_name, label=label, ref=False)
+    rocplotter.get_roc_vars_and_plot(plot_roc, mf_name, label=label, ref=False)
 
 # plot gn2 last
-rocplotter_default.get_roc_vars_and_plot(plot_roc_gn2, name="GN2", ref=True)
+rocplotter_default.get_roc_vars_and_plot(plot_roc_gn2, name="GN2", ref=True, colour="#28427b")
 
 plot_dir = "/home/xucabis2/salt/iman/plots/figs"
-weighting = "lossbased"
+weighting = (
+    "lossbased"
+    if "lossbased" in file_path
+    else "gradbased"
+    if "gradbased" in file_path
+    else "polyloss"
+    if "polyloss" in file_path
+    else "undefined"
+)
 
 plot_roc_gn2.draw()
 

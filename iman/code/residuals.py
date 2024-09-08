@@ -1,9 +1,9 @@
 import warnings
-from datetime import datetime
 
 import h5py
 import numpy as np
 from puma import Histogram, HistogramPlot
+from utils import load_file_paths
 
 warnings.filterwarnings("ignore")
 
@@ -69,9 +69,7 @@ def extract_MF_name(path):
     return path.partition(prefix)[2].partition(suffix)[0]
 
 
-def object_residuals(
-    fnames_preds, fname_truth, var_name, cut_range=None, plot_range=None, norm=False
-):
+def object_residuals(file_path, fname_truth, var_name, cut_range=None, plot_range=None, norm=False):
     # extract truth hadrons from test file
     h5truth = h5py.File(fname_truth, "r")
     truth_hadrons = h5truth["truth_hadrons"]
@@ -79,8 +77,10 @@ def object_residuals(
     # initialise histogram plot
     plot_histo = initialise_histogram(var_name, norm, cut_range)
 
+    file_paths_dict = load_file_paths(file_path)
+    fnames_preds = file_paths_dict.copy()  # Create a copy of the original dictionary
     # loop through prediction files
-    for fname_preds in fnames_preds:
+    for label, fname_preds in fnames_preds.items():
         # extract regression predictions from prediction file
         h5preds = h5py.File(fname_preds, "r")
 
@@ -112,13 +112,13 @@ def object_residuals(
         residuals = residuals[res_mask]
 
         # plot naming stuff
-        tag = extract_MF_name(fname_preds)
+        mf_name = extract_MF_name(fname_preds)
         # tag = "GLS" if fnames_preds == fname_gls_old else tag
-        label = f"{tag}: " r"$\mu =$ " f"{mean:.2f}, " r"$\sigma =$ " f"{std:.2f}"
-        ref = tag == "default"  # reference data will be default weighting scheme
+        name_label = f"{label}: " r"$\mu =$ " f"{mean:.2f}, " r"$\sigma =$ " f"{std:.2f}"
+        ref = mf_name == "default"  # reference data will be default weighting scheme
 
         # create histogram and add to histogram plot
-        hist = Histogram(residuals, label=label)
+        hist = Histogram(residuals, label=name_label)
         plot_histo.add(hist, reference=ref)
 
     # more plot naming stuff
@@ -127,13 +127,20 @@ def object_residuals(
         if cut == (np.nanmin(truth), np.nanmax(truth))
         else f"{cut[0]:.1f}"
         if cut[1] == np.inf
-        else f"{cut[0]:.1f}{cut[1]:.1f}"
+        else f"{cut[0]:.1f}_{cut[1]:.1f}"
     )
-
+    weighting = (
+        "lossbased"
+        if "lossbased" in file_path
+        else "gradbased"
+        if "gradbased" in file_path
+        else "polyloss"
+        if "polyloss" in file_path
+        else "undefined"
+    )
     normed = "norm" if norm else "unnorm"
-    plot_dir = "/home/xucabis2/salt/iman/plots/residuals/new"
-    timestamp = datetime.now().strftime("%m%d")
-    plot_name = f"{plot_dir}/{normed}/res_{tag}_{var_name}_{cut_name}_{normed}_{timestamp}.png"
+    plot_dir = "/home/xucabis2/salt/iman/plots/figs"
+    plot_name = f"{plot_dir}/res_{weighting}_{var_name}_{cut_name}_{normed}.png"
 
     # draw and save plot
     plot_histo.draw()
@@ -141,77 +148,9 @@ def object_residuals(
     print("Saving to ", plot_name)
 
 
-fname_arxiv = (
-    "/home/xucabis2/salt/logs/MaskFormer_arxiv_20240724-T114414/"
-    "ckpts/epoch=019-val_loss=0.65962__test_ttbar.h5"
-)
-fname_default = (
-    "/home/xucabis2/salt/logs/MaskFormer_default_20240724-T112538/"
-    "ckpts/epoch=019-val_loss=0.65355__test_ttbar.h5"
-)
-
-fname_equal = (
-    "/home/xucabis2/salt/logs/MaskFormer_equal_20240724-T114419/ckpts/"
-    "epoch=019-val_loss=0.64428__test_ttbar.h5"
-)
-
-fname_gls = (
-    "/home/xucabis2/salt/logs/MaskFormer_GLS_20240730-T002427/ckpts/"
-    "epoch=018-val_loss=0.65171__test_ttbar.h5"
-)
-
-fname_dwa = (
-    "/home/xucabis2/salt/logs/MaskFormer_DWA_20240806-T121649/"
-    "ckpts/epoch=019-val_loss=0.64425__test_ttbar.h5"
-)
-
-
-# fnames_preds = [fname_default, fname_gls, fname_dwa]
-
-fname_default = (
-    "/home/xucabis2/salt/logs/_old/_pre-b-hadron-weighting/_baselines/"
-    "MaskFormer_default_20240724-T112538/ckpts/epoch=019-val_loss=0.65355__test_ttbar.h5"
-)
-
-fname_gls = (
-    "/home/xucabis2/salt/logs/MaskFormer_GLS_20240809-T191439/"
-    "ckpts/epoch=018-val_loss=0.65630__test_ttbar.h5"
-)
-
-fname_dwa = (
-    "/home/xucabis2/salt/logs/MaskFormer_DWA_20240811-T105042/"
-    "ckpts/epoch=019-val_loss=0.64261__test_ttbar.h5"
-)
-
-fname_uw = (
-    "/home/xucabis2/salt/logs/MaskFormer_UW_20240810-T111330/"
-    "ckpts/epoch=019-val_loss=0.29020__test_ttbar.h5"
-)
-
-fname_gls_old = (
-    "/home/xucabis2/salt/logs/_old/_pre-b-hadron-weighting/"
-    "MaskFormer_GLS_20240730-T002427/ckpts/epoch=018-val_loss=0.65171__test_ttbar.h5"
-)
-
-fname_aligned = (
-    "/home/xucabis2/salt/logs/MaskFormer_AlignedMTL_20240821-T131155/"
-    "ckpts/epoch=019-val_loss=0.64403__test_ttbar.h5"
-)
-
-fname_cagrad = (
-    "/home/xucabis2/salt/logs/MaskFormer_CAGrad_20240821-T141325/"
-    "ckpts/epoch=019-val_loss=0.64449__test_ttbar.h5"
-)
-
-fname_pcgrad = (
-    "/home/xucabis2/salt/logs/MaskFormer_PCGrad_20240821-T140219/"
-    "ckpts/epoch=019-val_loss=0.64397__test_ttbar.h5"
-)
-
-fnames_preds = [fname_default, fname_aligned, fname_cagrad, fname_pcgrad]
-
-
 fname_truth = "/home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_test_ttbar.h5"
+
+file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
 
 # Lxy cuts
 cuts = [(0, 0.1), (0.1, 1), (1, 5), (5, np.inf)]
@@ -223,19 +162,19 @@ variables = ["pt", "deta", "dphi", "Lxy", "mass"]
 #     object_residuals(fnames_preds, fname_truth, variable, norm=True)
 #     object_residuals(fnames_preds, fname_truth, variable, norm=False)
 
-object_residuals(fnames_preds, fname_truth, "dphi", plot_range=(-4, 5), norm=True)
-object_residuals(fnames_preds, fname_truth, "dphi", plot_range=(-0.1, 0.1), norm=False)
+object_residuals(file_path, fname_truth, "dphi", plot_range=(-4, 5), norm=True)
+object_residuals(file_path, fname_truth, "dphi", plot_range=(-0.1, 0.1), norm=False)
 
-object_residuals(fnames_preds, fname_truth, "deta", plot_range=(-4, 5), norm=True)
-object_residuals(fnames_preds, fname_truth, "deta", plot_range=(-0.1, 0.1), norm=False)
+object_residuals(file_path, fname_truth, "deta", plot_range=(-4, 5), norm=True)
+object_residuals(file_path, fname_truth, "deta", plot_range=(-0.1, 0.1), norm=False)
 
-object_residuals(fnames_preds, fname_truth, "Lxy", (1, np.inf), plot_range=(-1, 2), norm=True)
-object_residuals(fnames_preds, fname_truth, "Lxy", (0, 1), plot_range=(-6, 6), norm=False)
+object_residuals(file_path, fname_truth, "Lxy", (1, np.inf), plot_range=(-1, 2), norm=True)
+object_residuals(file_path, fname_truth, "Lxy", (0, 1), plot_range=(-6, 6), norm=False)
 
 # object_residuals(fnames_preds, fname_truth, "mass", plot_range=(-1, 0.5), norm=True)
 # object_residuals(fnames_preds, fname_truth, "mass", plot_range=(-750, 500), norm=False)
 
-object_residuals(fnames_preds, fname_truth, "pt", plot_range=(-2, 4), norm=True)
+object_residuals(file_path, fname_truth, "pt", plot_range=(-2, 4), norm=True)
 
-object_residuals(fnames_preds, fname_truth, "mass", plot_range=(-1, 2.5), norm=True)
-object_residuals(fnames_preds, fname_truth, "mass", plot_range=(-4200.0, 4700.0), norm=False)
+object_residuals(file_path, fname_truth, "mass", plot_range=(-1, 2.5), norm=True)
+object_residuals(file_path, fname_truth, "mass", plot_range=(-4200.0, 4700.0), norm=False)

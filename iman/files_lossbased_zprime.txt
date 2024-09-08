@@ -1,6 +1,7 @@
-fname_default=/home/xucabis2/salt/logs/_final/MaskFormer_default_20240828-T113812/ckpts/epoch=029-val_loss=0.64809__test_zprime.h5
-fname_gls=/home/xucabis2/salt/logs/_final/MaskFormer_GLS_20240902-T084826/ckpts/epoch=029-val_loss=0.64470__test_zprime.h5
-fname_uw=/home/xucabis2/salt/logs/_final/MaskFormer_UW_20240901-T003519/ckpts/epoch=029-val_loss=0.64037__test_zprime.h5
-fname_dwa=/home/xucabis2/salt/logs/_final/MaskFormer_DWA_20240901-T005936/ckpts/epoch=029-val_loss=0.63966__test_zprime.h5
-fname_rlw=/home/xucabis2/salt/logs/_final/MaskFormer_RLW_20240826-T234255/ckpts/epoch=029-val_loss=0.64060__test_zprime.h5
-fname_stch=/home/xucabis2/salt/logs/_final/MaskFormer_STCH_20240904-T023541/ckpts/epoch=029-val_loss=0.64920__test_zprime.h5
+Default=/home/xucabis2/salt/logs/_final/MaskFormer_default_20240828-T113812/ckpts/epoch=029-val_loss=0.64809__test_zprime.h5
+GLS=/home/xucabis2/salt/logs/_final/MaskFormer_GLS_20240902-T084826/ckpts/epoch=029-val_loss=0.64470__test_zprime.h5
+UW=/home/xucabis2/salt/logs/_final/MaskFormer_UW_20240901-T003519/ckpts/epoch=029-val_loss=0.64037__test_zprime.h5
+DWA=/home/xucabis2/salt/logs/_final/MaskFormer_DWA_20240901-T005936/ckpts/epoch=029-val_loss=0.63966__test_zprime.h5
+RLW=/home/xucabis2/salt/logs/_final/MaskFormer_RLW_20240826-T234255/ckpts/epoch=029-val_loss=0.64060__test_zprime.h5
+STCH=/home/xucabis2/salt/logs/_final/MaskFormer_STCH_20240904-T023541/ckpts/epoch=029-val_loss=0.64920__test_zprime.h5
+FAMO=/home/xucabis2/salt/logs/_final/MaskFormer_FAMO_20240905-T210944/ckpts/epoch=029-val_loss=0.66001__test_zprime.h5

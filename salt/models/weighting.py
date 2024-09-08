@@ -211,6 +211,7 @@ class GLS(Weighting):
 
     def __init__(self, task_names=None):
         super().__init__(task_names=task_names, auto_opt=True)
+        self.loss_weights = dict.fromkeys(self.task_names, 1.0)
 
     def total_loss(self, loss: dict, loss_mode: str = "GLS"):
         return super().total_loss(loss, loss_mode)
@@ -696,8 +697,8 @@ class DBMTL(Weighting):
         self.beta, self.beta_sigma = DB_beta, DB_beta_sigma
         self.step = 0
 
-    def set_model(self, model):
-        super().set_model(model)
+    def set_model_and_input_norm(self, model, input_norm):
+        super().set_model_and_input_norm(model, input_norm)
         self._compute_grad_dim()
         self.grad_buffer = torch.zeros(self.task_num, self.grad_dim).to("cuda")
 
