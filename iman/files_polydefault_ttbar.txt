@@ -1,0 +1,2 @@
+Default=/home/xucabis2/salt/logs/_final/MaskFormer_default_20240828-T113812/ckpts/epoch=029-val_loss=0.64809__test_ttbar.h5
+Default (Poly-MaskCE, ε: -1)=/home/xucabis2/salt/logs/_final/MaskFormer_PolyMaskCE_20240905-T220809/ckpts/epoch=029-val_loss=0.64600__test_ttbar.h5

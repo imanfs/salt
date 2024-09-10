@@ -1,0 +1,2 @@
+GLS=/home/xucabis2/salt/logs/_final/MaskFormer_GLS_20240902-T084826/ckpts/epoch=029-val_loss=0.64470__test_ttbar.h5
+GLS (Poly-MaskCE, ε: -1)=/home/xucabis2/salt/logs/_final/MaskFormer_GLS_20240907-T101337/ckpts/epoch=029-val_loss=0.64741__test_ttbar.h5

@@ -55,7 +55,7 @@ def mask_ce_loss(inputs: Tensor, labels: Tensor):
     """
     pt = torch.sigmoid(inputs)
     pt = torch.where(labels == 1, pt, 1 - pt)
-    epsilon = 1
+    epsilon = -1
     # pt = labels * F.softmax(inputs, dim=-1)  # , dim = -1
     CE = F.binary_cross_entropy_with_logits(inputs, labels, reduction="none")
     loss = CE + epsilon * (1 - pt)

@@ -1,0 +1,2 @@
+DWA=/home/xucabis2/salt/logs/_final/MaskFormer_DWA_20240901-T005936/ckpts/epoch=029-val_loss=0.63966__test_ttbar.h5
+DWA (Poly-MaskCE, ε: -1)=/home/xucabis2/salt/logs/_final/MaskFormer_DWA_20240907-T012306/ckpts/epoch=029-val_loss=0.63925__test_ttbar.h5

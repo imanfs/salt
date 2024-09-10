@@ -49,13 +49,20 @@ class Plotter:
         self.task_colors = dict(zip(self.task_names, self.colors, strict=False))
 
     def plot_cossim(
-        self, metric_name, metric_data, main_task_name, smoothing_name, ax=None, metric_type=None
+        self,
+        metric_name,
+        metric_data,
+        main_task_name,
+        smoothing_name,
+        ax=None,
+        metric_type=None,
+        weighting="Default weights",
     ):
         if ax is None:
             fig, ax = plt.subplots()
 
         self.clean_name(metric_name, main_task_name, metric_type=metric_type)
-        metric_label = self.metric_label
+        # metric_label = self.metric_label
         ax.plot(
             metric_data["step"],
             metric_data[smoothing_name],
@@ -66,13 +73,16 @@ class Plotter:
         )
         ax.set_xlabel("Step")
         ax.set_ylabel(self.metric_label)
-        other_tasks = (
-            " of " + self.main_task_name + " with other tasks"
+        title = (
+            r"$\phi$ for " + self.main_task_name + " with other tasks"
             if self.metric_type == "cos_sim"
-            else ""
+            else r"Gradient $L_1$ norms"
+            if self.metric_type == "grad_L1"
+            else r"Gradient $L_2$ norms"
+            if self.metric_type == "grad_L2"
+            else self.metric_type
         )
-        title = metric_label + other_tasks
-        ax.set_title(title)
+        ax.set_title(title + (f" ({weighting})"))
         ax.legend()
 
         if ax is None:
@@ -82,9 +92,7 @@ class Plotter:
     def split_modify_case_combine(self, metric_name, combine_str=" "):
         words = metric_name.split("_")
         if combine_str == " ":
-            words = [
-                word.upper() if word in {"ce", "dice"} else word.capitalize() for word in words
-            ]
+            words = [word.upper() if word == "ce" else word.capitalize() for word in words]
         return combine_str.join(words)
 
     def clean_name(self, metric, main_task=None, metric_type=None):
@@ -111,13 +119,16 @@ def smooth(y, box_pts):
     return np.convolve(y, box, mode="same")
 
 
+plot_style()
 api_key = "xwLSnGIZdSJEBPjktmQTZiBv0"
 api = API(api_key=api_key)
 
 # Replace with your workspace, project name, and experiment key
 workspace = "isanai"
 project_name = "salt"
-experiment_key = "d3ff503afa724b39b8712dc63abad83b"
+def_key = "d3ff503afa724b39b8712dc63abad83b"
+eq_key = "c06e541eec644a5f9b79570bbc3742b7"
+experiment_key = def_key
 
 experiment = api.get_experiment(
     workspace=workspace, project_name=project_name, experiment=experiment_key
@@ -141,7 +152,9 @@ ax_el1_grads.axvline(x=12000, color="k", linestyle="--", lw=0.5, alpha=0.5)
 ax_el2_grads.axvline(x=12000, color="k", linestyle="--", lw=0.5, alpha=0.5)
 
 plot_dir = "/home/xucabis2/salt/iman/plots/figs/"
+weighting = r"$w_{\mathrm{equal}}$" if experiment_key == eq_key else r"$w_{\mathrm{default}}$"
 
+w_label = "_eq" if experiment_key == eq_key else "_def"
 for task in plotter.task_names:
     fig_cos_sim, ax_cos_sim = plt.subplots()
     ax_cos_sim.axvline(x=12000, color="k", linestyle="--", lw=0.5, alpha=0.5)
@@ -157,8 +170,9 @@ for task in plotter.task_names:
                 "smoothedValue",
                 ax=ax_cos_sim,
                 metric_type="cos_sim",
+                weighting=weighting,
             )
-            plot_name_cossim = "cos_sim_" + task + ".png"
+            plot_name_cossim = "cos_sim_" + task + w_label + ".png"
         if "grad_L1" in metric and task in metric:
             window = 15
             metrics_df["smoothedValue"] = metrics_df["metricValue"].rolling(window=window).mean()
@@ -170,8 +184,9 @@ for task in plotter.task_names:
                 "smoothedValue",
                 ax=ax_el1_grads,
                 metric_type="grad_L1",
+                weighting=weighting,
             )
-            plot_name_el1 = plotter.metric_type + ".png"
+            plot_name_el1 = plotter.metric_type + w_label + ".png"
         if "grad_L2" in metric and task in metric:
             window = 15
             metrics_df["smoothedValue"] = metrics_df["metricValue"].rolling(window=window).mean()
@@ -183,8 +198,9 @@ for task in plotter.task_names:
                 "smoothedValue",
                 ax=ax_el2_grads,
                 metric_type="grad_L2",
+                weighting=weighting,
             )
-            plot_name_el2 = plotter.metric_type + ".png"
+            plot_name_el2 = plotter.metric_type + w_label + ".png"
     format_plot(plot_dir + plot_name_cossim, show_axis=True, fig=fig_cos_sim, ax=ax_cos_sim)
 format_plot(plot_dir + plot_name_el1, show_axis=True, fig=fig_el1_grads, ax=ax_el1_grads)
 format_plot(plot_dir + plot_name_el2, show_axis=True, fig=fig_el2_grads, ax=ax_el2_grads)

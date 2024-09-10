@@ -14,6 +14,12 @@ def extract_MF_name(path, mf_only=False):
     return path.partition(prefix)[2].partition(suffix)[0]
 
 
+def extract_fig_name(path):
+    prefix = "files_"
+    suffix = "_"
+    return path.partition(prefix)[2].partition(suffix)[0]
+
+
 class ROCPlotter:
     def __init__(self, df, sig_eff=None):
         if sig_eff is None:
@@ -74,35 +80,6 @@ class ROCPlotter:
         self.plt_roc(RocPlot, cjets_rej, self.n_jets_c, "cjets", colour=colour)
 
 
-# file_path = "/home/xucabis2/salt/iman/files_gradbased_ttbar.txt"
-# file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
-file_path = "/home/xucabis2/salt/iman/files_polyloss_ttbar.txt"
-file_paths_dict = load_file_paths(file_path)
-fnames_preds = file_paths_dict.copy()  # Create a copy of the original dictionary
-fnames_preds.pop("Default", None)
-
-ref = "MF"
-
-reader = H5Reader(file_paths_dict["Default"], batch_size=1_000)
-df_default = pd.DataFrame(
-    reader.load(
-        {
-            "jets": [
-                "pt",
-                "eta",
-                "flavour_label",
-                "MaskFormer_default_pb",
-                "MaskFormer_default_pc",
-                "MaskFormer_default_pu",
-                "GN2v00_pb",
-                "GN2v00_pc",
-                "GN2v00_pu",
-            ]
-        },
-        num_jets=500_000,
-    )["jets"]
-)
-
 plot_roc_gn2 = RocPlot(
     n_ratio_panels=2,
     ylabel="Background rejection",
@@ -125,8 +102,38 @@ plot_roc = RocPlot(
 plot_roc.set_ratio_class(1, "ujets")
 plot_roc.set_ratio_class(2, "cjets")
 
-# sig_eff = np.linspace(0.59, 0.9, 20)
+# file_path = "/home/xucabis2/salt/iman/files_gradbased_ttbar.txt"
+# file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
+file_path = "/home/xucabis2/salt/iman/files_polyloss_ttbar.txt"
+
+# file_path = "/home/xucabis2/salt/iman/files_default_ttbar.txt"
+file_paths_dict = load_file_paths(file_path)
+fnames_preds = file_paths_dict.copy()  # Create a copy of the original dictionary
+fnames_preds.pop("Default", None)
+
+# # sig_eff = np.linspace(0.59, 0.9, 20)
 sig_eff = np.linspace(0.49, 1, 20)
+
+reader = H5Reader(file_paths_dict["Default"], batch_size=1_000)
+df_default = pd.DataFrame(
+    reader.load(
+        {
+            "jets": [
+                "pt",
+                "eta",
+                "flavour_label",
+                "MaskFormer_default_pb",
+                "MaskFormer_default_pc",
+                "MaskFormer_default_pu",
+                "GN2v00_pb",
+                "GN2v00_pc",
+                "GN2v00_pu",
+            ]
+        },
+        num_jets=500_000,
+    )["jets"]
+)
+
 rocplotter_default = ROCPlotter(df_default, sig_eff)
 
 # plot MF default first so they have the same colour
@@ -134,6 +141,8 @@ rocplotter_default.get_roc_vars_and_plot(plot_roc_gn2, "default", ref=False)
 rocplotter_default.get_roc_vars_and_plot(plot_roc, "default", ref=True)
 
 for label, fname in fnames_preds.items():
+    # ref = label == "Default"
+    ref = False
     mf_name = extract_MF_name(fname)
     reader = H5Reader(fname, batch_size=1_000)
     df = pd.DataFrame(
@@ -153,27 +162,17 @@ for label, fname in fnames_preds.items():
     )
     rocplotter = ROCPlotter(df, sig_eff)
     # MF comparison plots
-    rocplotter.get_roc_vars_and_plot(plot_roc_gn2, mf_name, label=label, ref=False)
-    rocplotter.get_roc_vars_and_plot(plot_roc, mf_name, label=label, ref=False)
+    rocplotter.get_roc_vars_and_plot(plot_roc_gn2, mf_name, label=label, ref=ref)
+    rocplotter.get_roc_vars_and_plot(plot_roc, mf_name, label=label, ref=ref)
+
+plot_dir = "/home/xucabis2/salt/iman/plots/figs"
+weighting = extract_fig_name(file_path)
+range_str = "" if sig_eff[0] == 0.49 and sig_eff[-1] == 1 else f"_{sig_eff[0]}_{sig_eff[-1]}"
 
 # plot gn2 last
 rocplotter_default.get_roc_vars_and_plot(plot_roc_gn2, name="GN2", ref=True, colour="#28427b")
 
-plot_dir = "/home/xucabis2/salt/iman/plots/figs"
-weighting = (
-    "lossbased"
-    if "lossbased" in file_path
-    else "gradbased"
-    if "gradbased" in file_path
-    else "polyloss"
-    if "polyloss" in file_path
-    else "undefined"
-)
-
 plot_roc_gn2.draw()
-
-range_str = "" if sig_eff[0] == 0.49 and sig_eff[-1] == 1 else f"_{sig_eff[0]}_{sig_eff[-1]}"
-
 plot_name = f"{plot_dir}/roc_{weighting}_GN2ref{range_str}.png"
 print("Saving to ", plot_name)
 plot_roc_gn2.savefig(plot_name, transparent=False)
@@ -183,3 +182,9 @@ plot_roc.draw()
 plot_name = f"{plot_dir}/roc_{weighting}_MFref{range_str}.png"
 print("Saving to ", plot_name)
 plot_roc.savefig(plot_name, transparent=False)
+
+# # if comparing 2 models without a default/gn2 reference
+# plot_roc.draw()
+# plot_name = f"{plot_dir}/roc_{weighting}{range_str}.png"
+# print("Saving to ", plot_name)
+# plot_roc.savefig(plot_name, transparent=False)
