@@ -8,8 +8,8 @@ from utils import load_file_paths
 warnings.filterwarnings("ignore")
 
 
-def valid(objects):
-    class_probs = np.array(objects["object_class_probs"])
+def valid(objects, n_test):
+    class_probs = np.array(objects["object_class_probs"])[:n_test]
     class_probs_3d = class_probs.view((np.float32, 3))
     return class_probs_3d[:, :, -1] < 0.5
 
@@ -73,6 +73,7 @@ def object_residuals(file_path, fname_truth, var_name, cut_range=None, plot_rang
     # extract truth hadrons from test file
     h5truth = h5py.File(fname_truth, "r")
     truth_hadrons = h5truth["truth_hadrons"]
+    n_test = 500_000
 
     # initialise histogram plot
     plot_histo = initialise_histogram(var_name, norm, cut_range)
@@ -84,16 +85,14 @@ def object_residuals(file_path, fname_truth, var_name, cut_range=None, plot_rang
         # extract regression predictions from prediction file
         h5preds = h5py.File(fname_preds, "r")
 
-        n_test = h5preds["tracks"].shape[0]
         objects = h5preds["objects"]  # hadrons
         reg_preds = objects["regression"]  # truth hadron regression predictions
 
         # get truth values and regression predictions for chosen variable (pT, Lxy, etc)
-        preds = reg_preds["regression_" + var_name]
+        preds = reg_preds["regression_" + var_name][:n_test]
         truth = truth_hadrons[var_name][:n_test]
-
         # get valid mask (predict null with p < 0.5) and filter for valid predictions
-        valid_mask = valid(objects) & truth_hadrons["valid"][:n_test]
+        valid_mask = valid(objects, n_test) & truth_hadrons["valid"][:n_test]
         preds, truth = preds[valid_mask], truth[valid_mask]
 
         # if no cut is specified, use the full range of the truth values
@@ -150,7 +149,7 @@ def object_residuals(file_path, fname_truth, var_name, cut_range=None, plot_rang
 
 fname_truth = "/home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_test_ttbar.h5"
 
-file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
+file_path = "/home/xucabis2/salt/iman/files_gradbased_ttbar.txt"
 
 # Lxy cuts
 cuts = [(0, 0.1), (0.1, 1), (1, 5), (5, np.inf)]

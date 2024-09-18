@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from salt.models.matcher import HungarianMatcher
+from salt.models.matcher_noreg import HungarianMatcher
 
 
 @torch.jit.script
@@ -95,7 +95,7 @@ def sigmoid_focal_loss(inputs: Tensor, targets: Tensor, alpha: float = -1, gamma
     return loss.mean(1).sum() / len(inputs)
 
 
-class MaskFormerLossIman(nn.Module):
+class MaskFormerLossNoRegMatching(nn.Module):
     """Compute the loss of MaskFormer, based on DETR.
 
     The process happens in two steps:

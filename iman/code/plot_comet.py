@@ -37,14 +37,15 @@ def format_plot(name=None, show_axis=False, fig=None, ax=None):
 
 class Plotter:
     def __init__(self):
-        self.task_names = [
-            "jets_classification",
-            "regression",
-            "mask_ce",
-            "mask_dice",
-            "track_origin",
-            "object_class_ce",
-        ]
+        self.y_axis_limits = {
+            "jets_classification": [-0.09, 0.68],
+            "regression": [-0.025, 0.055],
+            "mask_ce": [-0.78, 0.78],
+            "mask_dice": [-0.78, 0.78],
+            "track_origin": [-0.09, 0.72],
+            "object_class_ce": [-0.09, 0.72],
+        }
+        self.task_names = list(self.y_axis_limits.keys())
         self.colors = list(plt.rcParams["axes.prop_cycle"].by_key()["color"])[:6]
         self.task_colors = dict(zip(self.task_names, self.colors, strict=False))
 
@@ -74,7 +75,7 @@ class Plotter:
         ax.set_xlabel("Step")
         ax.set_ylabel(self.metric_label)
         title = (
-            r"$\phi$ for " + self.main_task_name + " with other tasks"
+            r"$\phi$ for " + self.main_task_label + " with other tasks"
             if self.metric_type == "cos_sim"
             else r"Gradient $L_1$ norms"
             if self.metric_type == "grad_L1"
@@ -84,6 +85,12 @@ class Plotter:
         )
         ax.set_title(title + (f" ({weighting})"))
         ax.legend()
+        if self.metric_type == "cos_sim":
+            ax.set_ylim(self.y_axis_limits[main_task_name])
+        elif self.metric_type == "grad_L1":
+            ax.set_ylim([-80, 2500])
+        elif self.metric_type == "grad_L2":
+            ax.set_ylim([-0.2, 6.0])
 
         if ax is None:
             return fig, ax
@@ -109,7 +116,7 @@ class Plotter:
                 "_" + main_task, ""
             )
 
-        self.main_task_name = self.split_modify_case_combine(main_task)
+        self.main_task_label = self.split_modify_case_combine(main_task)
         self.task_label = self.split_modify_case_combine(metric_cleaned)
         self.task_cleaned_name = self.split_modify_case_combine(metric_cleaned, combine_str="_")
 
@@ -128,11 +135,10 @@ workspace = "isanai"
 project_name = "salt"
 def_key = "d3ff503afa724b39b8712dc63abad83b"
 eq_key = "c06e541eec644a5f9b79570bbc3742b7"
-experiment_key = def_key
+def_unscaled_key = "1fcd7cedd15e43218ca8c924f213613c"
+exp_key = def_unscaled_key
 
-experiment = api.get_experiment(
-    workspace=workspace, project_name=project_name, experiment=experiment_key
-)
+experiment = api.get_experiment(workspace=workspace, project_name=project_name, experiment=exp_key)
 
 metrics = experiment.get_metrics()
 
@@ -152,9 +158,9 @@ ax_el1_grads.axvline(x=12000, color="k", linestyle="--", lw=0.5, alpha=0.5)
 ax_el2_grads.axvline(x=12000, color="k", linestyle="--", lw=0.5, alpha=0.5)
 
 plot_dir = "/home/xucabis2/salt/iman/plots/figs/"
-weighting = r"$w_{\mathrm{equal}}$" if experiment_key == eq_key else r"$w_{\mathrm{default}}$"
+weighting = r"$w_{\mathrm{equal}}$" if exp_key == eq_key else r"$w_{\mathrm{default}}$"
 
-w_label = "_eq" if experiment_key == eq_key else "_def"
+w_label = "_eq" if exp_key == eq_key else "_def" if exp_key == def_key else "_def_unscaled"
 for task in plotter.task_names:
     fig_cos_sim, ax_cos_sim = plt.subplots()
     ax_cos_sim.axvline(x=12000, color="k", linestyle="--", lw=0.5, alpha=0.5)

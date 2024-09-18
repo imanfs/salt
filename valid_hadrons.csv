@@ -1,0 +1,80 @@
+Label,Valid hadron predictions (%)
+Default,21.943199999999997
+Label,Valid hadron predictions (%)
+Default,21.943199999999997
+Label,Valid hadron predictions (%)
+GLS,22.9854
+Label,Valid hadron predictions (%)
+STCH,64.6742
+Label,Valid hadron predictions (%)
+UW,41.654799999999994
+Label,Valid hadron predictions (%)
+DWA,68.4948
+Label,Valid hadron predictions (%)
+RLW,38.6964
+Label,Valid hadron predictions (%)
+FAMO,37.663799999999995
+Label,Valid hadron predictions (%)
+AlignedMTL,39.2006
+Label,Valid hadron predictions (%)
+CAGrad,42.5412
+Label,Valid hadron predictions (%)
+GradNorm,57.4747
+Label,Valid hadron predictions (%)
+NashMTL,56.835899999999995
+Label,Valid hadron predictions (%)
+PCGrad,57.43430000000001
+Label,Valid hadron predictions (%)
+"Default (Poly-MaskCE, ε: 1)",20.5988
+Label,Valid hadron predictions (%)
+"Default (Poly-MaskCE, ε: -1)",21.2964
+Label,Valid hadron predictions (%)
+"DWA (Poly-MaskCE, ε: -1)",63.1854
+Label,Valid hadron predictions (%)
+"GLS (Poly-MaskCE, ε: -1)",22.474800000000002
+Label,Valid hadron predictions (%)
+Default,21.943199999999997
+Label,Valid hadron predictions (%)
+GLS,22.9854
+Label,Valid hadron predictions (%)
+Default,21.943199999999997
+Label,Valid hadron predictions (%)
+GLS,22.9854
+Label,Valid hadron predictions (%)
+Default,21.943199999999997
+Label,Valid hadron predictions (%)
+Default,21.943199999999997
+Label,Valid hadron predictions (%)
+GLS,22.9854
+Label,Valid hadron predictions (%)
+Default,78.05680000000001
+Label,Valid hadron predictions (%)
+GLS,77.0146
+Label,Valid hadron predictions (%)
+STCH,35.3258
+Label,Valid hadron predictions (%)
+UW,58.3452
+Label,Valid hadron predictions (%)
+DWA,31.5052
+Label,Valid hadron predictions (%)
+RLW,61.3036
+Label,Valid hadron predictions (%)
+FAMO,62.3362
+Label,Valid hadron predictions (%)
+AlignedMTL,60.799400000000006
+Label,Valid hadron predictions (%)
+CAGrad,57.4588
+Label,Valid hadron predictions (%)
+GradNorm,42.5253
+Label,Valid hadron predictions (%)
+NashMTL,43.1641
+Label,Valid hadron predictions (%)
+PCGrad,42.5657
+Label,Valid hadron predictions (%)
+"Default (Poly-MaskCE, ε: 1)",79.4012
+Label,Valid hadron predictions (%)
+"Default (Poly-MaskCE, ε: -1)",78.7036
+Label,Valid hadron predictions (%)
+"DWA (Poly-MaskCE, ε: -1)",36.8146
+Label,Valid hadron predictions (%)
+"GLS (Poly-MaskCE, ε: -1)",77.52520000000001

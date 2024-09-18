@@ -41,7 +41,7 @@ class ROCPlotter:
 
     def apply_discs(self):
         """Apply the discriminant function across the data in df."""
-        label = "GN2v00" if "GN2" in self.name else f"MaskFormer_{self.name}"
+        label = self.name if "GN2" in self.name else f"MaskFormer_{self.name}"
         return np.apply_along_axis(
             self.disc_fct,
             1,
@@ -52,7 +52,13 @@ class ROCPlotter:
         """Plot the ROC curve using the RocPlot object."""
         if self.label is None:
             self.label = self.name.capitalize() if "default" in self.name else self.name.upper()
-        label = "GN2" if "GN2" in self.name else f"MF-{self.label}" + tags
+        label = (
+            "GN2-full"
+            if self.name == "GN2v00"
+            else "GN2-small"
+            if self.name == "GN2"
+            else f"MF-{self.label}" + tags
+        )
 
         RocPlot.add_roc(
             Roc(
@@ -91,6 +97,17 @@ plot_roc_gn2 = RocPlot(
 plot_roc_gn2.set_ratio_class(1, "ujets")
 plot_roc_gn2.set_ratio_class(2, "cjets")
 
+plot_roc_gn2_small = RocPlot(
+    n_ratio_panels=2,
+    ylabel="Background rejection",
+    xlabel="$b$-jet efficiency",
+    atlas_second_tag="$\\sqrt{s}=13$ TeV, ttbar jets, $f_{c}=0.018$",
+    figsize=(6.5, 6),
+    y_scale=1.4,
+)
+plot_roc_gn2_small.set_ratio_class(1, "ujets")
+plot_roc_gn2_small.set_ratio_class(2, "cjets")
+
 plot_roc = RocPlot(
     n_ratio_panels=2,
     ylabel="Background rejection",
@@ -102,9 +119,9 @@ plot_roc = RocPlot(
 plot_roc.set_ratio_class(1, "ujets")
 plot_roc.set_ratio_class(2, "cjets")
 
-# file_path = "/home/xucabis2/salt/iman/files_gradbased_ttbar.txt"
+file_path = "/home/xucabis2/salt/iman/files_gradbased_ttbar.txt"
 # file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
-file_path = "/home/xucabis2/salt/iman/files_polyloss_ttbar.txt"
+# file_path = "/home/xucabis2/salt/iman/files_polyloss_ttbar.txt"
 
 # file_path = "/home/xucabis2/salt/iman/files_default_ttbar.txt"
 file_paths_dict = load_file_paths(file_path)
@@ -125,9 +142,6 @@ df_default = pd.DataFrame(
                 "MaskFormer_default_pb",
                 "MaskFormer_default_pc",
                 "MaskFormer_default_pu",
-                "GN2v00_pb",
-                "GN2v00_pc",
-                "GN2v00_pu",
             ]
         },
         num_jets=500_000,
@@ -136,8 +150,9 @@ df_default = pd.DataFrame(
 
 rocplotter_default = ROCPlotter(df_default, sig_eff)
 
-# plot MF default first so they have the same colour
+# plot MF default first so they have the same colour, one mf for each plot
 rocplotter_default.get_roc_vars_and_plot(plot_roc_gn2, "default", ref=False)
+rocplotter_default.get_roc_vars_and_plot(plot_roc_gn2_small, "default", ref=False)
 rocplotter_default.get_roc_vars_and_plot(plot_roc, "default", ref=True)
 
 for label, fname in fnames_preds.items():
@@ -163,6 +178,7 @@ for label, fname in fnames_preds.items():
     rocplotter = ROCPlotter(df, sig_eff)
     # MF comparison plots
     rocplotter.get_roc_vars_and_plot(plot_roc_gn2, mf_name, label=label, ref=ref)
+    rocplotter.get_roc_vars_and_plot(plot_roc_gn2_small, mf_name, label=label, ref=ref)
     rocplotter.get_roc_vars_and_plot(plot_roc, mf_name, label=label, ref=ref)
 
 plot_dir = "/home/xucabis2/salt/iman/plots/figs"
@@ -170,12 +186,44 @@ weighting = extract_fig_name(file_path)
 range_str = "" if sig_eff[0] == 0.49 and sig_eff[-1] == 1 else f"_{sig_eff[0]}_{sig_eff[-1]}"
 
 # plot gn2 last
-rocplotter_default.get_roc_vars_and_plot(plot_roc_gn2, name="GN2", ref=True, colour="#28427b")
+
+gn2_file = (
+    "/home/xucabis2/salt/logs/_final/GN2_20240918-T090931/ckpts/"
+    "epoch=028-val_loss=0.63562__test_ttbar.h5"
+)
+reader = H5Reader(gn2_file, batch_size=1_000)
+df_gn2 = pd.DataFrame(
+    reader.load(
+        {
+            "jets": [
+                "pt",
+                "eta",
+                "flavour_label",
+                "GN2_pb",
+                "GN2_pc",
+                "GN2_pu",
+                "GN2v00_pb",
+                "GN2v00_pc",
+                "GN2v00_pu",
+            ]
+        },
+        num_jets=500_000,
+    )["jets"]
+)
+
+rocplotter_gn2 = ROCPlotter(df_gn2, sig_eff)
+rocplotter_gn2.get_roc_vars_and_plot(plot_roc_gn2_small, name="GN2", ref=True, colour="#28427b")
+rocplotter_gn2.get_roc_vars_and_plot(plot_roc_gn2, name="GN2v00", ref=True, colour="#28427b")
 
 plot_roc_gn2.draw()
 plot_name = f"{plot_dir}/roc_{weighting}_GN2ref{range_str}.png"
 print("Saving to ", plot_name)
 plot_roc_gn2.savefig(plot_name, transparent=False)
+
+plot_roc_gn2_small.draw()
+plot_name = f"{plot_dir}/roc_{weighting}_GN2smallref{range_str}.png"
+print("Saving to ", plot_name)
+plot_roc_gn2_small.savefig(plot_name, transparent=False)
 
 
 plot_roc.draw()

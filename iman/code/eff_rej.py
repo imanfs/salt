@@ -5,27 +5,49 @@ from puma.metrics import calc_rej
 from utils import load_file_paths
 
 
-def append_rejections_to_csv(label, sig_eff, ujets_rej, cjets_rej, file_name="rejections.csv"):
+def rej_to_csv(label, sig_eff, ujets_rej, cjets_rej, file_name="rejections.csv"):
     """Append rejection values for u-jets and c-jets to a CSV file."""
     # Create a DataFrame with the values
     data = {
         "Label": [label] * len(sig_eff),
         "Signal Efficiency": sig_eff,
-        "u-jets Rejection": ujets_rej,
-        "c-jets Rejection": cjets_rej,
+        "u-jets Rejection": [round(val, 2) for val in ujets_rej],
+        "c-jets Rejection": [round(val, 2) for val in cjets_rej],
     }
 
     df = pd.DataFrame(data)
+    write_header = True
+    with open(file_name) as f:
+        first_line = f.readline().strip()
+        if first_line:
+            write_header = False
 
+    df.to_csv(file_name, mode="a", header=write_header, index=False)
     # Append to CSV file (create if doesn't exist)
-    df.to_csv(file_name, mode="a", header=not pd.io.common.file_exists(file_name), index=False)
     print(f"Data for label {label} appended to {file_name}")
 
 
-# Assuming `roc_calc.get_roc_vars()` returns the rejection values
+def percent_to_csv(label, sig_eff, ujets_percent, cjets_percent, file_name="percent.csv"):
+    """Append rejection values % increase for u-jets and c-jets to a CSV file."""
+    # Create a DataFrame with the values
+    data = {
+        "Label": [label] * len(sig_eff),
+        "Signal Efficiency": sig_eff,
+        "u-jets Rejection (% increase)": [round(val, 2) for val in ujets_percent],
+        "c-jets Rejection (% increase)": [round(val, 2) for val in cjets_percent],
+    }
 
+    df = pd.DataFrame(data)
+    write_header = True
 
-file_name = "/home/xucabis2/salt/iman/plots/figs/rejections.csv"  # Output CSV file
+    with open(file_name) as f:
+        first_line = f.readline().strip()
+        if first_line:
+            write_header = False
+
+    df.to_csv(file_name, mode="a", header=write_header, index=False)
+
+    print(f"Data for label {label} appended to {file_name}")
 
 
 def extract_MF_name(path, mf_only=False):
@@ -80,7 +102,17 @@ class RejectionCalc:
         return ujets_rej, cjets_rej
 
 
-file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
+# Assuming `roc_calc.get_roc_vars()` returns the rejection values
+rej_file = "/home/xucabis2/salt/iman/plots/figs/rejections.csv"  # Output CSV file
+percent_file = "/home/xucabis2/salt/iman/plots/figs/percent.csv"  # Output CSV file
+
+with open(rej_file, "w") as file:
+    pass
+
+with open(percent_file, "w") as file:
+    pass
+
+file_path = "/home/xucabis2/salt/iman/files_all_ttbar.txt"
 file_paths_dict = load_file_paths(file_path)
 fnames_preds = file_paths_dict.copy()  # Create a copy of the original dictionary
 fnames_preds.pop("Default", None)
@@ -106,8 +138,8 @@ df_default = pd.DataFrame(
 )
 
 roc_calc = RejectionCalc(df_default)
-ujets_rej, cjets_rej = roc_calc.get_roc_vars("default")
-append_rejections_to_csv("Default", roc_calc.sig_eff, ujets_rej, cjets_rej, file_name=file_name)
+ujets_rej_def, cjets_rej_def = roc_calc.get_roc_vars("default")
+rej_to_csv("Default", roc_calc.sig_eff, ujets_rej_def, cjets_rej_def, file_name=rej_file)
 
 for label, fname in fnames_preds.items():
     mf_name = extract_MF_name(fname)
@@ -128,8 +160,18 @@ for label, fname in fnames_preds.items():
         )["jets"]
     )
     roc_calc = RejectionCalc(df)
-    ujets_rej, cjets_rej = roc_calc.get_roc_vars(label)
-    append_rejections_to_csv(label, roc_calc.sig_eff, ujets_rej, cjets_rej, file_name=file_name)
+
+    ujets_rej, cjets_rej = roc_calc.get_roc_vars(mf_name)
+    rej_to_csv(label, roc_calc.sig_eff, ujets_rej, cjets_rej, file_name=rej_file)
+
+    # Compute percentage increase over the "Default" model
+    ujets_rej_percent = ((ujets_rej - ujets_rej_def) / ujets_rej_def) * 100
+    cjets_rej_percent = ((cjets_rej - cjets_rej_def) / cjets_rej_def) * 100
+
+    # Append percentage increase to CSV
+    percent_to_csv(
+        label, roc_calc.sig_eff, ujets_rej_percent, cjets_rej_percent, file_name=percent_file
+    )
 
 plot_dir = "/home/xucabis2/salt/iman/plots/figs"
 weighting = extract_fig_name(file_path)

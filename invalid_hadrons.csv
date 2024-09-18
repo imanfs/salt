@@ -1,0 +1,74 @@
+Label,Invalid hadron predictions (%)
+Default,75.60759999999999
+Label,Invalid hadron predictions (%)
+GLS,72.63199999999999
+Label,Invalid hadron predictions (%)
+STCH,35.4914
+Label,Invalid hadron predictions (%)
+UW,58.5754
+Label,Invalid hadron predictions (%)
+DWA,28.1366
+Label,Invalid hadron predictions (%)
+RLW,61.0624
+Label,Invalid hadron predictions (%)
+FAMO,66.7292
+Label,Invalid hadron predictions (%)
+AlignedMTL,61.4583
+Label,Invalid hadron predictions (%)
+CAGrad,60.8856
+Label,Invalid hadron predictions (%)
+GradNorm,45.1251
+Label,Invalid hadron predictions (%)
+NashMTL,43.838899999999995
+Label,Invalid hadron predictions (%)
+PCGrad,44.4432
+Label,Invalid hadron predictions (%)
+"Default (Poly-MaskCE, ε: 1)",79.587
+Label,Invalid hadron predictions (%)
+"Default (Poly-MaskCE, ε: -1)",76.466
+Label,Invalid hadron predictions (%)
+"DWA (Poly-MaskCE, ε: -1)",35.221599999999995
+Label,Invalid hadron predictions (%)
+"GLS (Poly-MaskCE, ε: -1)",74.1634
+Label,Invalid hadron predictions (%)
+Default,75.60759999999999
+Label,Invalid hadron predictions (%)
+Default,75.60759999999999
+Label,Invalid hadron predictions (%)
+GLS,72.63199999999999
+Label,Invalid hadron predictions (%)
+Default,75.60759999999999
+Label,Invalid hadron predictions (%)
+Default,75.60759999999999
+Label,Invalid hadron predictions (%)
+Default,24.3924
+Label,Invalid hadron predictions (%)
+GLS,27.368
+Label,Invalid hadron predictions (%)
+STCH,64.5086
+Label,Invalid hadron predictions (%)
+UW,41.4246
+Label,Invalid hadron predictions (%)
+DWA,71.8634
+Label,Invalid hadron predictions (%)
+RLW,38.9376
+Label,Invalid hadron predictions (%)
+FAMO,33.2708
+Label,Invalid hadron predictions (%)
+AlignedMTL,38.5417
+Label,Invalid hadron predictions (%)
+CAGrad,39.114399999999996
+Label,Invalid hadron predictions (%)
+GradNorm,54.874900000000004
+Label,Invalid hadron predictions (%)
+NashMTL,56.1611
+Label,Invalid hadron predictions (%)
+PCGrad,55.556799999999996
+Label,Invalid hadron predictions (%)
+"Default (Poly-MaskCE, ε: 1)",20.413
+Label,Invalid hadron predictions (%)
+"Default (Poly-MaskCE, ε: -1)",23.534
+Label,Invalid hadron predictions (%)
+"DWA (Poly-MaskCE, ε: -1)",64.7784
+Label,Invalid hadron predictions (%)
+"GLS (Poly-MaskCE, ε: -1)",25.836599999999997

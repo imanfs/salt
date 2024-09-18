@@ -114,6 +114,12 @@ class ModelWrapper(L.LightningModule):
         self.weighting.set_model_and_input_norm(self.model, self.norm)
         # self.calc_cos_cim = self.weighting.calc_cos_sim # override to True if desired for auto opt
         self.calc_cos_sim = False
+        if self.calc_cos_sim:
+            print(
+                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                "!!!!!!!!!!!!!!!!!\n"
+            )
+            print("Calculating cos similarities is ON. This may slow down training.")
         self.automatic_optimization = self.weighting.auto_opt
 
     def total_loss(self, loss: dict):
@@ -241,7 +247,7 @@ class ModelWrapper(L.LightningModule):
             self.log_weights(self.weighting.loss_weights, stage="train")
             if self.calc_cos_sim:
                 # log explicitly calculated gradients
-                self.grads = self.weighting.compute_grad(loss, mode="autograd").to("cuda")
+                self.grads = self.weighting.compute_grad(log_loss, mode="autograd").to("cuda")
                 self.log_grads(self.grads)
 
                 # log cos similarities
