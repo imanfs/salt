@@ -53,9 +53,9 @@ class ROCPlotter:
         if self.label is None:
             self.label = self.name.capitalize() if "default" in self.name else self.name.upper()
         label = (
-            "GN2-full"
+            "GN2-Full"
             if self.name == "GN2v00"
-            else "GN2-small"
+            else "GN2-Small"
             if self.name == "GN2"
             else f"MF-{self.label}" + tags
         )
@@ -119,11 +119,13 @@ plot_roc = RocPlot(
 plot_roc.set_ratio_class(1, "ujets")
 plot_roc.set_ratio_class(2, "cjets")
 
-file_path = "/home/xucabis2/salt/iman/files_gradbased_ttbar.txt"
-# file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
-# file_path = "/home/xucabis2/salt/iman/files_polyloss_ttbar.txt"
+baseline_single_plot = False
 
-# file_path = "/home/xucabis2/salt/iman/files_default_ttbar.txt"
+# file_path = "/home/xucabis2/salt/iman/files_gradbased_ttbar.txt"
+# file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
+file_path = "/home/xucabis2/salt/iman/files_polyloss_ttbar.txt"
+
+# file_path = "/home/xucabis2/salt/iman/files_baselines_ttbar.txt"
 file_paths_dict = load_file_paths(file_path)
 fnames_preds = file_paths_dict.copy()  # Create a copy of the original dictionary
 fnames_preds.pop("Default", None)
@@ -212,24 +214,29 @@ df_gn2 = pd.DataFrame(
 )
 
 rocplotter_gn2 = ROCPlotter(df_gn2, sig_eff)
-rocplotter_gn2.get_roc_vars_and_plot(plot_roc_gn2_small, name="GN2", ref=True, colour="#28427b")
-rocplotter_gn2.get_roc_vars_and_plot(plot_roc_gn2, name="GN2v00", ref=True, colour="#28427b")
+
+if baseline_single_plot:
+    rocplotter_gn2.get_roc_vars_and_plot(plot_roc_gn2, name="GN2", ref=False)
+    rocplotter_gn2.get_roc_vars_and_plot(plot_roc_gn2, name="GN2v00", ref=True, colour="#28427b")
+else:
+    rocplotter_gn2.get_roc_vars_and_plot(plot_roc_gn2_small, name="GN2", ref=True, colour="#28427b")
+    rocplotter_gn2.get_roc_vars_and_plot(plot_roc_gn2, name="GN2v00", ref=True, colour="#28427b")
 
 plot_roc_gn2.draw()
 plot_name = f"{plot_dir}/roc_{weighting}_GN2ref{range_str}.png"
 print("Saving to ", plot_name)
 plot_roc_gn2.savefig(plot_name, transparent=False)
 
-plot_roc_gn2_small.draw()
-plot_name = f"{plot_dir}/roc_{weighting}_GN2smallref{range_str}.png"
-print("Saving to ", plot_name)
-plot_roc_gn2_small.savefig(plot_name, transparent=False)
+if not baseline_single_plot:
+    plot_roc_gn2_small.draw()
+    plot_name = f"{plot_dir}/roc_{weighting}_GN2smallref{range_str}.png"
+    print("Saving to ", plot_name)
+    plot_roc_gn2_small.savefig(plot_name, transparent=False)
 
-
-plot_roc.draw()
-plot_name = f"{plot_dir}/roc_{weighting}_MFref{range_str}.png"
-print("Saving to ", plot_name)
-plot_roc.savefig(plot_name, transparent=False)
+    plot_roc.draw()
+    plot_name = f"{plot_dir}/roc_{weighting}_MFref{range_str}.png"
+    print("Saving to ", plot_name)
+    plot_roc.savefig(plot_name, transparent=False)
 
 # # if comparing 2 models without a default/gn2 reference
 # plot_roc.draw()
