@@ -3,9 +3,10 @@ from pathlib import Path
 
 import h5py
 import pytest
+import yaml
 
 from salt.main import main
-from salt.to_onnx import main as to_onnx
+from salt.onnx.to_onnx import main as to_onnx
 from salt.utils.get_onnx_metadata import main as get_onnx_metadata
 from salt.utils.inputs import write_dummy_file, write_dummy_norm_dict
 
@@ -39,12 +40,6 @@ def run_train(tmp_path, config_path, train_args, do_xbb=False, do_muP=False, inc
     args += [f"--trainer.default_root_dir={tmp_path}"]
     args += ["--trainer.logger.offline=True"]
 
-    # add another instance of the prediction writer callback with tracks added
-    args += ["--trainer.callbacks+=salt.callbacks.PredictionWriter"]
-    args += ["--trainer.callbacks.write_tracks=True"]
-    # Add object writer callback for MaskFormer
-    if "MaskFormer" in str(config_path):
-        args += ["--trainer.callbacks.write_objects=True"]
     if train_args:
         args += train_args
 
@@ -61,11 +56,21 @@ def run_eval(tmp_path, train_config_path, nd_path, do_xbb=False):
     test_h5_path = Path(tmp_path) / "dummy_test_sample_inputs.h5"
     write_dummy_file(test_h5_path, nd_path, do_xbb)
 
+    # Modify the output config to force writing tracks in the prediction writer
+    with open(train_config_path) as f:
+        config = yaml.safe_load(f)
+        for callback in config["trainer"]["callbacks"]:
+            if "PredictionWriter" in callback["class_path"]:
+                callback["init_args"]["write_tracks"] = True
+                break
+    with open(train_config_path, "w") as f:
+        yaml.dump(config, f)
     args = ["test"]
 
     args += [f"--config={train_config_path}"]
     args += [f"--data.test_file={test_h5_path}"]
     args += ["--data.num_test=1000"]
+    args += ["--data.batch_size=100"]
     main(args)
 
     # check output h5 files are produced
@@ -79,29 +84,30 @@ def run_eval(tmp_path, train_config_path, nd_path, do_xbb=False):
         if "GN2" in str(train_config_path):
             assert "tracks" in f
             assert len(f["tracks"]) == 1000
+
         if "maskformer" in str(train_config_path):
-            assert "objects" in f
-            tgt_masks = f["objects"]["tgt_masks"]
-            assert tgt_masks
-            assert tgt_masks.shape == (1000, 5, 40)
+            assert "truth_hadrons" in f
+            assert len(f["truth_hadrons"]) == 1000
+            assert f["truth_hadrons"].shape[1] == 5
+            required_keys = {
+                "MaskFormer_regression_pt",
+                "MaskFormer_regression_deta",
+                "MaskFormer_regression_dphi",
+                "MaskFormer_regression_mass",
+                "MaskFormer_regression_Lxy",
+                "MaskFormer_pb",
+                "MaskFormer_pc",
+                "MaskFormer_pnull",
+                "class_label",
+            }
+            print(set(required_keys) - set(f["truth_hadrons"].dtype.names))
+            print(set(f["truth_hadrons"].dtype.names) - set(required_keys))
+            assert all(k in f["truth_hadrons"].dtype.names for k in required_keys)
 
-            mask_logits = f["objects"]["mask_logits"]
-            assert mask_logits
-            assert mask_logits.shape == (1000, 5, 40)
-
-            obj_cls_tgt = f["objects"]["object_class_targets"]
-            assert obj_cls_tgt
-            assert obj_cls_tgt.shape == (1000, 5)
-
-            obj_cls_probs = f["objects"]["object_class_probs"]
-            assert obj_cls_probs
-            assert obj_cls_probs.shape == (1000, 5)
-            assert len(obj_cls_probs.dtype.names) == 3
-
-            regression = f["objects"]["regression"]
-            assert regression
-            assert regression.shape == (1000, 5)
-            assert len(regression.dtype.names) == 5
+            assert "object_masks" in f
+            assert f["object_masks"].shape == (1000, 5, 40)
+            assert "mask_logits" in f["object_masks"].dtype.names
+            assert "truth_mask" in f["object_masks"].dtype.names
 
 
 def run_onnx(train_dir, args=None):
@@ -127,10 +133,14 @@ def run_combined(
     inc_params=False,
 ):
     sys.argv = [sys.argv[0]]  # ignore pytest cli args when running salt cli
-    config_base = Path(__file__).parent.parent / "configs"
+
+    # look for the config
+    config_path = Path(__file__).parent.parent / "configs" / config
+    if not config_path.is_file():
+        config_path = Path(__file__).parent / "configs" / config
 
     # run training
-    run_train(tmp_path, config_base / config, train_args, do_xbb, do_muP, inc_params)
+    run_train(tmp_path, config_path, train_args, do_xbb, do_muP, inc_params)
 
     if do_eval:
         train_dir = [x for x in tmp_path.iterdir() if x.is_dir() and (x / "config.yaml").exists()]
@@ -204,7 +214,7 @@ def test_nan_regression(tmp_path) -> None:
 
 @pytest.mark.filterwarnings(w)
 def test_regression_gaussian(tmp_path) -> None:
-    run_combined(tmp_path, "regression_gaussian.yaml", do_eval=True, do_onnx=False)
+    run_combined(tmp_path, "regression_gaussian.yaml", do_eval=True, do_onnx=True)
 
 
 @pytest.mark.filterwarnings(w)
@@ -214,8 +224,7 @@ def test_flow(tmp_path) -> None:
 
 @pytest.mark.filterwarnings(w)
 def test_no_global_inputs(tmp_path) -> None:
-    [f"--config={Path(__file__).parent.parent / 'tests' / 'configs' / 'no_global_inputs.yaml'}"]
-    run_combined(tmp_path, CONFIG, do_eval=False, do_onnx=False)
+    run_combined(tmp_path, "no_global_inputs.yaml", do_eval=False, do_onnx=False)
 
 
 @pytest.mark.filterwarnings(w)
@@ -283,10 +292,9 @@ def test_gls_weighting(tmp_path) -> None:
     args = ["--model.loss_mode=lol"]
     with pytest.raises(AssertionError):
         run_combined(tmp_path, "dips.yaml", train_args=args)
+
     # Should fail, as we still have weights here
-
     args = ["--model.loss_mode=GLS"]
-
     with pytest.raises(AssertionError):
         run_combined(tmp_path, "GN2.yaml", train_args=args)
 
