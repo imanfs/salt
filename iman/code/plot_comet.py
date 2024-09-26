@@ -136,7 +136,7 @@ project_name = "salt"
 def_key = "d3ff503afa724b39b8712dc63abad83b"
 eq_key = "c06e541eec644a5f9b79570bbc3742b7"
 def_unscaled_key = "1fcd7cedd15e43218ca8c924f213613c"
-exp_key = def_unscaled_key
+exp_key = eq_key
 
 experiment = api.get_experiment(workspace=workspace, project_name=project_name, experiment=exp_key)
 
@@ -154,8 +154,6 @@ plotter = Plotter()
 fig_el1_grads, ax_el1_grads = plt.subplots()
 fig_el2_grads, ax_el2_grads = plt.subplots()
 
-ax_el1_grads.axvline(x=12000, color="k", linestyle="--", lw=0.5, alpha=0.5)
-ax_el2_grads.axvline(x=12000, color="k", linestyle="--", lw=0.5, alpha=0.5)
 
 plot_dir = "/home/xucabis2/salt/iman/plots/figs/"
 weighting = r"$w_{\mathrm{equal}}$" if exp_key == eq_key else r"$w_{\mathrm{default}}$"

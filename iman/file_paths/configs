@@ -1,0 +1,7 @@
+
+GLS=/home/xucabis2/salt/logs/_final/MaskFormer_GLS_20240902-T084826/config.yaml
+STCH=/home/xucabis2/salt/logs/_final/MaskFormer_STCH_20240904-T023541/config.yaml
+UW=/home/xucabis2/salt/logs/_final/MaskFormer_UW_20240901-T003519/config.yaml
+DWA=/home/xucabis2/salt/logs/_final/MaskFormer_DWA_20240901-T005936/config.yaml
+RLW=/home/xucabis2/salt/logs/_final/MaskFormer_RLW_20240826-T234255/config.yaml
+FAMO=/home/xucabis2/salt/logs/_final/MaskFormer_FAMO_20240905-T210944/config.yaml

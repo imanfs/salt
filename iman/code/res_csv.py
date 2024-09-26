@@ -1,9 +1,11 @@
 import warnings
+from pathlib import Path
 
 import h5py
 import numpy as np
-from puma import Histogram, HistogramPlot
-from utils import extract_fig_name, load_file_paths
+import pandas as pd
+from puma import HistogramPlot
+from utils import load_file_paths
 
 warnings.filterwarnings("ignore")
 
@@ -77,9 +79,34 @@ def extract_MF_name(path):
     return path.partition(prefix)[2].partition(suffix)[0]
 
 
-def object_residuals(file_path, fname_truth, var_name, cut_range=None, plot_range=None, norm=False):
-    weighting = extract_fig_name(file_path)
+def residuals_to_csv(label, var, res_mean, res_std, file_name="res_norm.csv"):
+    """Append rejection values % increase for u-jets and c-jets to a CSV file."""
+    plot_dir = "/home/xucabis2/salt/iman/plots/figs/csv/"
+    # Create a DataFrame with the values
+    rounding = 4 if "unnorm" in file_name else 2
+    data = {
+        "Weighting": [label],
+        "Regression Variable": [var],
+        "Residual Mean": [round(res_mean, rounding)],
+        "Residual Standard Deviation": [round(res_std, rounding)],
+    }
 
+    df = pd.DataFrame(data)
+
+    file_path = Path(plot_dir) / file_name
+    write_header = True
+
+    if Path.exists(file_path):
+        with open(file_path) as f:
+            first_line = f.readline().strip()
+            if first_line:
+                write_header = False
+
+    df.to_csv(file_path, mode="a", header=write_header, index=False)
+    print(f"Data for {label} appended to {file_name}")
+
+
+def object_residuals(file_path, fname_truth, var_name, cut_range=None, norm=False):
     file_paths_dict = load_file_paths(file_path)
     fnames_preds = file_paths_dict.copy()  # Create a copy of the original dictionary
     # extract truth hadrons from test file
@@ -87,8 +114,7 @@ def object_residuals(file_path, fname_truth, var_name, cut_range=None, plot_rang
     truth_hadrons = h5truth["truth_hadrons"]
     n_test = 500_000
 
-    # initialise histogram plot
-    plot_histo = initialise_histogram(var_name, norm, cut_range)
+    normed = "norm" if norm else "unnorm"
 
     # loop through prediction files
     for label, fname_preds in fnames_preds.items():
@@ -116,40 +142,8 @@ def object_residuals(file_path, fname_truth, var_name, cut_range=None, plot_rang
         residuals = calc_residuals(truth_cut, preds_cut, norm=norm)
         mean, std = np.mean(residuals), np.std(residuals)
 
-        # if no plot_range is specified, use the full range of residuals
-        plot_rng = plot_range or (np.nanmin(residuals), np.nanmax(residuals))
-        res_mask = (residuals >= plot_rng[0]) & (residuals <= plot_rng[1])
-        residuals = residuals[res_mask]
-
-        # plot naming stuff
-        # tag = "GLS" if fnames_preds == fname_gls_old else tag
-        name_label = f"{label}: " r"$\mu =$ " f"{mean:.2f}, " r"$\sigma =$ " f"{std:.2f}"
-        ref = mf_name == "default"  # reference data will be default weighting scheme
-
-        # create histogram and add to histogram plot
-        hist = Histogram(residuals, label=name_label)
-        plot_histo.add(hist, reference=ref)
-
-    # more plot naming stuff
-    cut_name = (
-        "all"
-        if cut == (np.nanmin(truth), np.nanmax(truth))
-        else f"{cut[0]:.1f}"
-        if cut[1] == np.inf
-        else f"{cut[0]:.1f}_{cut[1]:.1f}"
-    )
-
-    weighting_str = "poly" if "poly" in weighting else weighting
-    plot_dir = "/home/xucabis2/salt/iman/plots"
-    normed = "norm" if norm else "unnorm"
-
-    plot_dir = f"/home/xucabis2/salt/iman/plots/figs/res/{weighting_str}"
-    plot_name = f"{plot_dir}/res_{weighting}_{var_name}_{cut_name}_{normed}.png"
-
-    # draw and save plot
-    plot_histo.draw()
-    plot_histo.savefig(plot_name, transparent=False)
-    print("Saving to ", plot_name)
+        # save residuals to csv
+        residuals_to_csv(label, var_name, mean, std, file_name=f"res_{normed}.csv")
 
 
 fname_truth = "/home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_test_ttbar.h5"
@@ -164,7 +158,7 @@ loss_ttbar = "/home/xucabis2/salt/iman/file_paths/files_lossbased_ttbar.txt"
 poly_ttbar = "/home/xucabis2/salt/iman/file_paths/files_polyloss_ttbar.txt"
 base_ttbar = "/home/xucabis2/salt/iman/file_paths/files_baselines_ttbar.txt"
 
-file_path = poly_ttbar
+files_all_ttbar = "/home/xucabis2/salt/iman/file_paths/files_all_ttbar.txt"
 
 # Lxy cuts
 cuts = [(0, 0.1), (0.1, 1), (1, 5), (5, np.inf)]
@@ -176,19 +170,32 @@ variables = ["pt", "deta", "dphi", "Lxy", "mass"]
 #     object_residuals(fnames_preds, fname_truth, variable, norm=True)
 #     object_residuals(fnames_preds, fname_truth, variable, norm=False)
 
-object_residuals(file_path, fname_truth, "dphi", plot_range=(-4, 5), norm=True)
-object_residuals(file_path, fname_truth, "dphi", plot_range=(-0.1, 0.1), norm=False)
+norm_file = "/home/xucabis2/salt/iman/plots/figs/csv/res_norm.csv"
+unnorm_file = "/home/xucabis2/salt/iman/plots/figs/csv/res_unnorm.csv"
 
-object_residuals(file_path, fname_truth, "deta", plot_range=(-4, 5), norm=True)
-object_residuals(file_path, fname_truth, "deta", plot_range=(-0.1, 0.1), norm=False)
+with open(norm_file, "w") as file:
+    pass
 
-object_residuals(file_path, fname_truth, "Lxy", (1, np.inf), plot_range=(-1, 2), norm=True)
-object_residuals(file_path, fname_truth, "Lxy", (0, 1), plot_range=(-6, 6), norm=False)
+with open(unnorm_file, "w") as file:
+    pass
+
+files_ttbar = [loss_ttbar, grad_ttbar, poly_ttbar]
+
+file_path = files_all_ttbar
+
+object_residuals(file_path, fname_truth, "dphi", norm=True)
+object_residuals(file_path, fname_truth, "dphi", norm=False)
+
+object_residuals(file_path, fname_truth, "deta", norm=True)
+object_residuals(file_path, fname_truth, "deta", norm=False)
+
+object_residuals(file_path, fname_truth, "Lxy", (1, np.inf), norm=True)
+object_residuals(file_path, fname_truth, "Lxy", (0, 1), norm=False)
 
 # object_residuals(fnames_preds, fname_truth, "mass", plot_range=(-1, 0.5), norm=True)
 # object_residuals(fnames_preds, fname_truth, "mass", plot_range=(-750, 500), norm=False)
 
-object_residuals(file_path, fname_truth, "pt", plot_range=(-2, 4), norm=True)
+object_residuals(file_path, fname_truth, "pt", norm=True)
 
-object_residuals(file_path, fname_truth, "mass", plot_range=(-1, 2.5), norm=True)
-object_residuals(file_path, fname_truth, "mass", plot_range=(-4200.0, 4700.0), norm=False)
+object_residuals(file_path, fname_truth, "mass", norm=True)
+object_residuals(file_path, fname_truth, "mass", norm=False)

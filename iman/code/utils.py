@@ -1,6 +1,7 @@
-import h5py
+import h5py  # noqa: I001
 import numpy as np
 from puma.hlplots import Tagger
+from puma.hlplots import AuxResults  # noqa: F401
 
 
 def load_file_paths(file_path):
@@ -65,40 +66,38 @@ def flavour_class_max(objects):
     return flavour
 
 
-def create_taggers(fname, ref=None):
-    name = extract_MF_name(fname)
-    MF = Tagger(
-        name="MaskFormer",
-        label=f"MF {name}",
-        reference=False,
+def create_tagger(fname, label, ref=False, name="MaskFormer"):
+    mf_name = extract_MF_name(fname)
+    if ref and name == "MaskFormer" and mf_name != "default":
+        print("Reference tagger for excl vertexing must be the default MaskFormer model.")
+    label = f"MF-{label}" if name == "MaskFormer" else name
+    tagger_name = f"MaskFormer_{mf_name}" if "MaskFormer" in fname else name
+    colour = "#28427b" if name == "SV1" else None
+    return Tagger(
+        name=tagger_name,
+        label=label,
+        reference=ref,
+        colour=colour,
         aux_tasks=["vertexing"],
         aux_labels=["ftagTruthParentBarcode"],
     )
-    if ref is not None:
-        ref_tagger = Tagger(
-            name=ref,
-            label=ref,
-            colour="#000000",
-            reference=True,
-            aux_tasks=["vertexing"],
-            aux_labels=["ftagTruthParentBarcode"],
-        )
-        return MF, ref_tagger
-    return MF
 
 
-def create_and_load_taggers(fname: str, aux_results, cuts, n_jets, ref=None) -> Tagger:
+def create_and_load_tagger(fname, label, aux_results, cuts, n_jets, ref=False, name="MaskFormer"):
     """Create and load a Tagger object from a file."""
-    if ref is not None:
-        MF, ref_tagger = create_taggers(fname, ref)
-        aux_results.load_taggers_from_file(
-            [MF, ref_tagger], fname, aux_key="tracks", cuts=cuts, num_jets=n_jets
-        )
-    else:
-        MF = create_taggers(fname)
-        aux_results.load_taggers_from_file(
-            [MF], fname, aux_key="tracks", cuts=cuts, num_jets=n_jets
-        )
+    tagger = create_tagger(fname, label, ref, name)
+    aux_results.load_taggers_from_file(
+        [tagger], fname, aux_key="tracks", cuts=cuts, num_jets=n_jets
+    )
+
+
+def create_and_load_taggers(fname, label, aux_results, cuts, n_jets, name="MaskFormer"):
+    """Create and load a Tagger object from a file."""
+    MF = create_tagger(fname, label, ref=False, name=name)
+    ref_tagger = create_tagger(fname, label, ref=True, name="SV1")
+    aux_results.load_taggers_from_file(
+        [MF, ref_tagger], fname, aux_key="tracks", cuts=cuts, num_jets=n_jets
+    )
 
 
 def del_new_tracks(fname: str):
@@ -153,3 +152,9 @@ def rename_vtxindex(fname: str, force: bool = False):
         file.create_dataset("new_tracks", data=new_data)
         print("New 'new_tracks' dataset created.")
     return fname
+
+
+def extract_fig_name(path):
+    prefix = "files_"
+    suffix = "_"
+    return path.partition(prefix)[2].partition(suffix)[0]

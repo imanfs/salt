@@ -1,0 +1,2 @@
+Default=/home/xucabis2/salt/logs/_final/MaskFormer_default_20240828-T113812/epoch=029-val_loss=0.64809__test_ttbar.h5
+GradVac=/home/xucabis2/salt/logs/_final/MaskFormer_GradVac_20240909-T132709/epoch=028-val_loss=0.63866__test_ttbar.h5

@@ -3,19 +3,13 @@ import pandas as pd
 from ftag.hdf5 import H5Reader
 from puma import Roc, RocPlot
 from puma.metrics import calc_rej
-from utils import load_file_paths
+from utils import extract_fig_name, load_file_paths
 
 
 def extract_MF_name(path, mf_only=False):
     if mf_only:
         return "salt"
     prefix = "MaskFormer_"
-    suffix = "_"
-    return path.partition(prefix)[2].partition(suffix)[0]
-
-
-def extract_fig_name(path):
-    prefix = "files_"
     suffix = "_"
     return path.partition(prefix)[2].partition(suffix)[0]
 
@@ -119,13 +113,19 @@ plot_roc = RocPlot(
 plot_roc.set_ratio_class(1, "ujets")
 plot_roc.set_ratio_class(2, "cjets")
 
-baseline_single_plot = False
 
-# file_path = "/home/xucabis2/salt/iman/files_gradbased_ttbar.txt"
-# file_path = "/home/xucabis2/salt/iman/files_lossbased_ttbar.txt"
-file_path = "/home/xucabis2/salt/iman/files_polyloss_ttbar.txt"
+grad_zprime = "/home/xucabis2/salt/iman/file_paths/files_gradbased_zprime.txt"
+loss_zprime = "/home/xucabis2/salt/iman/file_paths/files_lossbased_zprime.txt"
+poly_zprime = "/home/xucabis2/salt/iman/file_paths/files_polyloss_zprime.txt"
+base_zprime = "/home/xucabis2/salt/iman/file_paths/files_baselines_zprime.txt"
 
-# file_path = "/home/xucabis2/salt/iman/files_baselines_ttbar.txt"
+grad_ttbar = "/home/xucabis2/salt/iman/file_paths/files_gradbased_ttbar.txt"
+loss_ttbar = "/home/xucabis2/salt/iman/file_paths/files_lossbased_ttbar.txt"
+poly_ttbar = "/home/xucabis2/salt/iman/file_paths/files_polyloss_ttbar.txt"
+base_ttbar = "/home/xucabis2/salt/iman/file_paths/files_baselines_ttbar.txt"
+
+file_path = grad_ttbar
+baseline_single_plot = (file_path == base_ttbar) | (file_path == base_zprime)
 file_paths_dict = load_file_paths(file_path)
 fnames_preds = file_paths_dict.copy()  # Create a copy of the original dictionary
 fnames_preds.pop("Default", None)
@@ -183,10 +183,6 @@ for label, fname in fnames_preds.items():
     rocplotter.get_roc_vars_and_plot(plot_roc_gn2_small, mf_name, label=label, ref=ref)
     rocplotter.get_roc_vars_and_plot(plot_roc, mf_name, label=label, ref=ref)
 
-plot_dir = "/home/xucabis2/salt/iman/plots/figs"
-weighting = extract_fig_name(file_path)
-range_str = "" if sig_eff[0] == 0.49 and sig_eff[-1] == 1 else f"_{sig_eff[0]}_{sig_eff[-1]}"
-
 # plot gn2 last
 
 gn2_file = (
@@ -212,6 +208,12 @@ df_gn2 = pd.DataFrame(
         num_jets=500_000,
     )["jets"]
 )
+
+weighting = extract_fig_name(file_path)
+weighting_str = "poly" if "poly" in weighting else weighting
+plot_dir = f"/home/xucabis2/salt/iman/plots/figs/roc/{weighting_str}"
+range_str = "" if sig_eff[0] == 0.49 and sig_eff[-1] == 1 else f"_{sig_eff[0]}_{sig_eff[-1]}"
+
 
 rocplotter_gn2 = ROCPlotter(df_gn2, sig_eff)
 

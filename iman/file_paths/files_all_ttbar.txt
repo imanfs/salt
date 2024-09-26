@@ -7,11 +7,12 @@ DWA=/home/xucabis2/salt/logs/_final/MaskFormer_DWA_20240901-T005936/ckpts/epoch=
 RLW=/home/xucabis2/salt/logs/_final/MaskFormer_RLW_20240826-T234255/ckpts/epoch=029-val_loss=0.64060__test_ttbar.h5
 FAMO=/home/xucabis2/salt/logs/_final/MaskFormer_FAMO_20240905-T210944/ckpts/epoch=029-val_loss=0.66001__test_ttbar.h5
 
-AlignedMTL=/home/xzcappon/phd/projects/supervising/2023_2024/iman/saved_models/MaskFormer_AlignedMTL_20240903-T152849/ckpts/epoch=028-val_loss=0.63910__test_ttbar__.h5
-CAGrad=/home/xzcappon/phd/projects/supervising/2023_2024/iman/saved_models/MaskFormer_CAGrad_20240903-T152853/ckpts/epoch=029-val_loss=0.63875__test_ttbar__.h5
-GradNorm=/home/xzcappon/phd/projects/supervising/2023_2024/iman/saved_models/MaskFormer_GradNorm_20240903-T152853/ckpts/epoch=029-val_loss=0.64021__test_ttbar__.h5
-NashMTL=/home/xzcappon/phd/projects/supervising/2023_2024/iman/saved_models/MaskFormer_NashMTL_20240903-T152853/ckpts/epoch=029-val_loss=0.63757__test_ttbar__.h5
-PCGrad=/home/xzcappon/phd/projects/supervising/2023_2024/iman/saved_models/MaskFormer_PCGrad_20240903-T152853/ckpts/epoch=029-val_loss=0.63856__test_ttbar__.h5
+AlignedMTL=/home/xucabis2/salt/logs/_final/MaskFormer_AlignedMTL_20240903-T152849/ckpts/epoch=028-val_loss=0.63910__test_ttbar.h5
+CAGrad=/home/xucabis2/salt/logs/_final/MaskFormer_CAGrad_20240903-T152853/ckpts/epoch=029-val_loss=0.63875__test_ttbar.h5
+GradNorm=/home/xucabis2/salt/logs/_final/MaskFormer_GradNorm_20240903-T152853/ckpts/epoch=029-val_loss=0.64021__test_ttbar.h5
+NashMTL=/home/xucabis2/salt/logs/_final/MaskFormer_NashMTL_20240903-T152853/ckpts/epoch=029-val_loss=0.63757__test_ttbar.h5
+PCGrad=/home/xucabis2/salt/logs/_final/MaskFormer_PCGrad_20240903-T152853/ckpts/epoch=029-val_loss=0.63856__test_ttbar.h5
+GradVac=/home/xucabis2/salt/logs/_final/MaskFormer_GradVac_20240909-T132709/ckpts/epoch=028-val_loss=0.63866__test_ttbar.h5
 
 Default (Poly-MaskCE, ε: 1)=/home/xucabis2/salt/logs/_final/MaskFormer_PolyMaskCEeps1_20240905-T235531/ckpts/epoch=029-val_loss=0.64902__test_ttbar.h5
 Default (Poly-MaskCE, ε: -1)=/home/xucabis2/salt/logs/_final/MaskFormer_PolyMaskCE_20240905-T220809/ckpts/epoch=029-val_loss=0.64600__test_ttbar.h5

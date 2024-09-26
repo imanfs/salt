@@ -227,7 +227,7 @@ class PredictionWriter(Callback):
             mask_indices = indices_from_mask(objects["masks"].cpu().sigmoid() > 0.5)
             dtype = np.dtype([(f"{module.name}_MaskIndex", "i8")])
             mask_indices = mask_indices.int().cpu().numpy()
-            mask_indices = np.where(~this_pad_masks, mask_indices, -1)
+            mask_indices = np.where(~this_pad_masks.cpu(), mask_indices, -1)
             to_write["tracks"]["mask_index"] = u2s(np.expand_dims(mask_indices, -1), dtype)
 
             # Write the truth mask and mask logits to their own dset

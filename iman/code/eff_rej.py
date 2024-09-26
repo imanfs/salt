@@ -103,8 +103,8 @@ class RejectionCalc:
 
 
 # Assuming `roc_calc.get_roc_vars()` returns the rejection values
-rej_file = "/home/xucabis2/salt/iman/plots/figs/rejections.csv"  # Output CSV file
-percent_file = "/home/xucabis2/salt/iman/plots/figs/percent.csv"  # Output CSV file
+rej_file = "/home/xucabis2/salt/iman/plots/figs/csv/rejections1.csv"  # Output CSV file
+percent_file = "/home/xucabis2/salt/iman/plots/figs/csv/percent1.csv"  # Output CSV file
 
 with open(rej_file, "w") as file:
     pass
@@ -112,7 +112,7 @@ with open(rej_file, "w") as file:
 with open(percent_file, "w") as file:
     pass
 
-file_path = "/home/xucabis2/salt/iman/files_all_ttbar.txt"
+file_path = "/home/xucabis2/salt/iman/file_paths/files_old_eval.txt"
 file_paths_dict = load_file_paths(file_path)
 fnames_preds = file_paths_dict.copy()  # Create a copy of the original dictionary
 fnames_preds.pop("Default", None)
