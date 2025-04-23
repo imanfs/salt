@@ -14,8 +14,8 @@ model:
       init_nets:
         - input_name: tracks
           dense_config:
-            output_size: &embed_dim 256
-            hidden_layers: [256]
+            output_size: &embed_dim 128
+            hidden_layers: [128]
             activation: &activation ReLU
 
       encoder:
@@ -58,6 +58,12 @@ model:
           loss_config:
             num_classes: 2
             loss_weights:
+              object_class_ce: 2.0
+              mask_ce: 10.0
+              mask_dice: 2.0
+              regression: 2.0
+
+            matcher_weights:
               object_class_ce: 2.0
               mask_ce: 10.0
               mask_dice: 2.0
@@ -184,25 +190,30 @@ data:
       name: tracks
       id_label: ftagTruthParentBarcode
 
-  train_file: /home/xzcappon/phd/datasets/hepformers/atlas_vertexing/ttbar/pp_output_train.h5
-  val_file: /home/xzcappon/phd/datasets/hepformers/atlas_vertexing/ttbar/pp_output_val.h5
-  norm_dict: /home/xzcappon/phd/datasets/hepformers/atlas_vertexing/ttbar/norm_dict.yaml
-  class_dict: /home/xzcappon/phd/datasets/hepformers/atlas_vertexing/ttbar/class_dict.yaml
+  train_file: /home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_train.h5
+  val_file: /home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_val.h5
+  test_file: /home/xzcappon/phd/datasets/vertexing_120m/output/pp_output_test_ttbar.h5
+  norm_dict: /home/xzcappon/phd/datasets/vertexing_120m/output/norm_dict.yaml
+  class_dict: /home/xzcappon/phd/datasets/vertexing_120m/output/class_dict.yaml
   #move_files_temp: /dev/shm/svanstro/salt/gn2/
-
-  batch_size: 4000
-  num_workers: 40
+  num_train: 20_000_000
+  num_val: 1_000_000
+  num_test: 500_000
+  batch_size: 12000
+  num_workers: 10
 
 trainer:
-  max_epochs: 40
+  max_epochs: 20
   accelerator: gpu
   devices: 1
   precision: 16-mixed
+  default_root_dir: logs
   callbacks:
     - class_path: salt.callbacks.Checkpoint
       init_args:
         monitor_loss: val_jets_classification_loss
     - class_path: salt.callbacks.PredictionWriter
+      init_args: { write_tracks: True, write_objects: True }
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
     - class_path: lightning.pytorch.callbacks.TQDMProgressBar
       init_args: { refresh_rate: 50 }

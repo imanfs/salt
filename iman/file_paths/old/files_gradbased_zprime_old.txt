@@ -1,0 +1,7 @@
+Default=/home/xucabis2/salt/logs/_final/MaskFormer_default_20240828-T113812/ckpts/epoch=029-val_loss=0.64809__test_zprime.h5
+
+AlignedMTL=/home/xucabis2/salt/logs/_final/MaskFormer_AlignedMTL_20240903-T152849/ckpts/epoch=028-val_loss=0.63910__test_zprime__.h5
+CAGrad=/home/xucabis2/salt/logs/_final/MaskFormer_CAGrad_20240903-T152853/ckpts/epoch=029-val_loss=0.63875__test_zprime__.h5
+GradNorm=/home/xucabis2/salt/logs/_final/MaskFormer_GradNorm_20240903-T152853/ckpts/epoch=029-val_loss=0.64021__test_zprime__.h5
+NashMTL=/home/xucabis2/salt/logs/_final/MaskFormer_NashMTL_20240903-T152853/ckpts/epoch=029-val_loss=0.63757__test_zprime__.h5
+PCGrad=/home/xucabis2/salt/logs/_final/MaskFormer_PCGrad_20240903-T152853/ckpts/epoch=029-val_loss=0.63856__test_zprime__.h5

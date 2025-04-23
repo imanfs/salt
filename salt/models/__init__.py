@@ -4,6 +4,8 @@ from salt.models.featurewise import FeaturewiseTransformation
 from salt.models.initnet import InitNet
 from salt.models.inputnorm import InputNorm
 from salt.models.maskformer_loss import MaskFormerLoss
+from salt.models.maskformer_loss_iman import MaskFormerLossIman
+from salt.models.maskformer_loss_poly import MaskFormerLossPoly
 from salt.models.pooling import (
     DictCrossAttentionPooling,
     GlobalAttentionPooling,
@@ -29,10 +31,40 @@ from salt.models.transformer import (
     TransformerEncoderLayer,
 )
 from salt.models.transformer_v2 import TransformerV2
+from salt.models.weighting import (
+    DBMTL,
+    DWA,
+    FAMO,
+    GLS,
+    IMTL,
+    MGDA,
+    RLW,
+    STCH,
+    UW,
+    AlignedMTL,
+    CAGrad,
+    GradNorm,
+    GradVac,
+    MoCo,
+    NashMTL,
+    PCGrad,
+    Static,
+)
 
 # from salt.models.maskformer import MaskFormer
 
 __all__ = [
+    "DBMTL",
+    "DWA",
+    "FAMO",
+    "GLS",
+    "IMTL",
+    "MGDA",
+    "RLW",
+    "STCH",
+    "UW",
+    "AlignedMTL",
+    "CAGrad",
     "ClassificationTask",
     "Dense",
     "DictCrossAttentionPooling",
@@ -40,19 +72,29 @@ __all__ = [
     "GATv2Attention",
     "GaussianRegressionTask",
     "GlobalAttentionPooling",
+    "GradNorm",
+    "GradVac",
+    "Gradients",
     "InitNet",
     "InputNorm",
     "MaskFormer",
     "MaskFormerLoss",
+    "MaskFormerLossIman",
+    "MaskFormerLossPoly",
+    "MoCo",
     "MultiheadAttention",
+    "NashMTL",
     "NodeQueryGAP",
+    "PCGrad",
     "Pooling",
     "PositionalEncoder",
     "R21Xbb",
     "RegressionTask",
     "RegressionTaskBase",
     "SaltModel",
+    "SaltModelIman",
     "ScaledDotProductAttention",
+    "Static",
     "TaskBase",
     "TensorCrossAttentionPooling",
     "Transformer",

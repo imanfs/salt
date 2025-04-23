@@ -1,0 +1,19 @@
+name: MaskFormer_MoCo
+
+model:
+  loss_weighting:
+    class_path: salt.models.MoCo
+  model:
+    init_args:
+      mask_decoder:
+        init_args:
+          loss_config:
+            weighting: MoCo
+            num_classes: 2
+            loss_weights:
+              object_class_ce: 2.0
+              mask_ce: 10.0
+              mask_dice: 2.0
+              regression: 0.5
+              jets_classification: 1.0
+              track_origin: 0.5

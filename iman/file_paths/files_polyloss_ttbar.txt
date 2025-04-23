@@ -1,0 +1,6 @@
+Default=/home/xucabis2/salt/logs/_final/MaskFormer_default_20240828-T113812/ckpts/epoch=029-val_loss=0.64809__test_ttbar.h5
+
+Default (Poly-MaskCE, ε: 1)=/home/xucabis2/salt/logs/_final/MaskFormer_PolyMaskCEeps1_20240905-T235531/ckpts/epoch=029-val_loss=0.64902__test_ttbar.h5
+Default (Poly-MaskCE, ε: -1)=/home/xucabis2/salt/logs/_final/MaskFormer_PolyMaskCE_20240905-T220809/ckpts/epoch=029-val_loss=0.64600__test_ttbar.h5
+DWA (Poly-MaskCE, ε: -1)=/home/xucabis2/salt/logs/_final/MaskFormer_DWA_20240907-T012306/ckpts/epoch=029-val_loss=0.63925__test_ttbar.h5
+GLS (Poly-MaskCE, ε: -1)=/home/xucabis2/salt/logs/_final/MaskFormer_GLS_20240907-T101337/ckpts/epoch=029-val_loss=0.64741__test_ttbar.h5
